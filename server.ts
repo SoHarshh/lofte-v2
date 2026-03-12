@@ -19,15 +19,22 @@ db.exec(`
     date TEXT NOT NULL,
     notes TEXT
   );
+`);
 
-  CREATE TABLE IF NOT EXISTS exercises (
+// Drop and recreate exercises to ensure correct schema for cardio
+db.exec(`
+  DROP TABLE IF EXISTS exercises;
+  CREATE TABLE exercises (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workout_id INTEGER NOT NULL,
     name TEXT NOT NULL,
     muscle_group TEXT,
-    sets INTEGER NOT NULL,
-    reps INTEGER NOT NULL,
-    weight REAL NOT NULL,
+    sets INTEGER,
+    reps INTEGER,
+    weight REAL,
+    distance REAL,
+    duration REAL,
+    calories REAL,
     FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE CASCADE
   );
 `);
@@ -65,7 +72,7 @@ async function startServer() {
     try {
       const insertWorkout = db.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
       const insertExercise = db.prepare(
-        "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
       const transaction = db.transaction(() => {
@@ -73,7 +80,17 @@ async function startServer() {
         const workoutId = info.lastInsertRowid;
 
         for (const ex of exercises) {
-          insertExercise.run(workoutId, ex.name, ex.muscleGroup || null, ex.sets, ex.reps, ex.weight);
+          insertExercise.run(
+            workoutId, 
+            ex.name, 
+            ex.muscleGroup || null, 
+            ex.sets ?? null, 
+            ex.reps ?? null, 
+            ex.weight ?? null,
+            ex.distance ?? null,
+            ex.duration ?? null,
+            ex.calories ?? null
+          );
         }
         return workoutId;
       });

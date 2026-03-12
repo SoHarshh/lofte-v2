@@ -4,6 +4,7 @@ import { VoiceRecorder } from './components/VoiceRecorder';
 import { VisionLogger } from './components/VisionLogger';
 import { Dashboard } from './components/Dashboard';
 import { WorkoutList } from './components/WorkoutList';
+import { Modal } from './components/Modal';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dumbbell, LayoutDashboard, List, Plus, Play, CheckCircle2, X, History as HistoryIcon, Camera, Mic } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -25,6 +26,11 @@ export default function App() {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [logMode, setLogMode] = useState<'smart' | 'vision'>('smart');
 
+  // Modal States
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const fetchWorkouts = async () => {
     try {
       const response = await fetch('/api/workouts');
@@ -41,16 +47,22 @@ export default function App() {
     fetchWorkouts();
   }, []);
 
-  const handleDeleteWorkout = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this workout?')) return;
-    
+  const handleDeleteWorkout = (id: number) => {
+    setDeleteId(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
     try {
-      const response = await fetch(`/api/workouts/${id}`, { method: 'DELETE' });
+      const response = await fetch(`/api/workouts/${deleteId}`, { method: 'DELETE' });
       if (response.ok) {
-        setWorkouts(workouts.filter(w => w.id !== id));
+        setWorkouts(workouts.filter(w => w.id !== deleteId));
       }
     } catch (error) {
       console.error('Failed to delete workout:', error);
+      setErrorMsg('Failed to delete workout. Please try again.');
+    } finally {
+      setDeleteId(null);
     }
   };
 
@@ -64,7 +76,8 @@ export default function App() {
 
   const handleEndWorkout = async () => {
     if (currentExercises.length === 0) {
-      if (!confirm('No exercises logged. End workout anyway?')) return;
+      setShowDiscardModal(true);
+      return;
     }
 
     const workoutData = {
@@ -90,8 +103,17 @@ export default function App() {
       }
     } catch (error) {
       console.error('Failed to save workout:', error);
-      alert('Failed to save workout. Please try again.');
+      setErrorMsg('Failed to save workout. Please try again.');
     }
+  };
+
+  const confirmDiscard = () => {
+    setIsWorkoutActive(false);
+    setCurrentExercises([]);
+    setSessionNotes('');
+    setSessionDate(null);
+    setActiveTab('dashboard');
+    setShowDiscardModal(false);
   };
 
   const handleDataExtracted = (data: any) => {
@@ -317,6 +339,36 @@ export default function App() {
           icon={<HistoryIcon size={20} />}
         />
       </nav>
+      
+      {/* Modals */}
+      <Modal
+        isOpen={showDiscardModal}
+        onClose={() => setShowDiscardModal(false)}
+        onConfirm={confirmDiscard}
+        title="Discard Session?"
+        message="You haven't logged any exercises. Are you sure you want to discard this session?"
+        confirmText="Discard"
+        type="danger"
+      />
+
+      <Modal
+        isOpen={deleteId !== null}
+        onClose={() => setDeleteId(null)}
+        onConfirm={confirmDelete}
+        title="Delete Workout?"
+        message="This action cannot be undone. Are you sure you want to delete this workout?"
+        confirmText="Delete"
+        type="danger"
+      />
+
+      <Modal
+        isOpen={errorMsg !== null}
+        onClose={() => setErrorMsg(null)}
+        onConfirm={() => setErrorMsg(null)}
+        title="Error"
+        message={errorMsg || ''}
+        confirmText="OK"
+      />
     </div>
   );
 }
