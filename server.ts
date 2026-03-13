@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { GoogleGenAI, Type } from "@google/genai";
 
 dotenv.config();
 
@@ -41,7 +42,123 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "20mb" }));
+
+  // AI Routes
+  app.post("/api/ai/parse-workout", async (req, res) => {
+    const { text, audioBase64, mimeType } = req.body;
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const parts: any[] = [];
+
+      if (audioBase64) {
+        parts.push({ text: "Extract workout data from this audio. Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array." });
+        parts.push({ inlineData: { mimeType: mimeType || "audio/webm", data: audioBase64 } });
+      } else if (text) {
+        parts.push({ text: `Extract workout data from this text: "${text}". Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array.` });
+      } else {
+        return res.status(400).json({ error: "Provide either text or audioBase64" });
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ parts }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              date: { type: Type.STRING },
+              notes: { type: Type.STRING },
+              exercises: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    muscleGroup: { type: Type.STRING },
+                    sets: { type: Type.NUMBER },
+                    reps: { type: Type.NUMBER },
+                    weight: { type: Type.NUMBER },
+                  },
+                  required: ["name", "sets", "reps", "weight"],
+                },
+              },
+            },
+            required: ["date", "exercises"],
+          },
+        },
+      });
+
+      res.json(JSON.parse(response.text));
+    } catch (error: any) {
+      console.error("AI parse-workout error:", error);
+      res.status(500).json({ error: error.message || "AI processing failed" });
+    }
+  });
+
+  app.post("/api/ai/parse-image", async (req, res) => {
+    const { imageBase64 } = req.body;
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{
+          parts: [
+            { text: `Extract workout data from this gym machine summary image.
+              The image could be from a treadmill, elliptical, rower, or a strength machine.
+              Rules:
+              1. Identify the machine type and put it in 'notes'.
+              2. For CARDIO (treadmill, etc.):
+                 - 'distance': Extract in meters (convert km to 1000m, miles to 1609m).
+                 - 'duration': Extract in seconds (convert mm:ss or hh:mm:ss).
+                 - 'calories': Extract as number.
+              3. For STRENGTH (weight machines):
+                 - 'name': Name of the exercise.
+                 - 'sets': Number of sets.
+                 - 'reps': Number of reps per set.
+                 - 'weight': Weight in lbs (convert kg to lbs if needed, 1kg = 2.2lbs).
+              4. If multiple exercises are visible, include all of them.
+              5. If data is unclear, make your best guess or omit the specific field.` },
+            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+          ],
+        }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              notes: { type: Type.STRING },
+              exercises: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    muscleGroup: { type: Type.STRING },
+                    sets: { type: Type.NUMBER },
+                    reps: { type: Type.NUMBER },
+                    weight: { type: Type.NUMBER },
+                    distance: { type: Type.NUMBER },
+                    duration: { type: Type.NUMBER },
+                    calories: { type: Type.NUMBER },
+                  },
+                  required: ["name"],
+                },
+              },
+            },
+            required: ["exercises"],
+          },
+        },
+      });
+
+      res.json(JSON.parse(response.text));
+    } catch (error: any) {
+      console.error("AI parse-image error:", error);
+      res.status(500).json({ error: error.message || "AI processing failed" });
+    }
+  });
 
   // API Routes
   app.get("/api/workouts", (req, res) => {

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Camera, RefreshCw, Check, Loader2, AlertCircle, X, Image as ImageIcon } from 'lucide-react';
+import { Camera, Check, Loader2, AlertCircle, X, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 
 interface VisionLoggerProps {
   onDataExtracted: (data: any) => void;
@@ -82,69 +81,19 @@ export const VisionLogger: React.FC<VisionLoggerProps> = ({ onDataExtracted }) =
     setStatus('processing');
     try {
       const base64Data = base64Image.split(',')[1];
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            parts: [
-              { text: `Extract workout data from this gym machine summary image. 
-              The image could be from a treadmill, elliptical, rower, or a strength machine (Technogym, Life Fitness, Matrix, etc.).
-              
-              Rules:
-              1. Identify the machine type and put it in 'notes'.
-              2. For CARDIO (treadmill, etc.):
-                 - 'distance': Extract in meters (convert km to 1000m, miles to 1609m).
-                 - 'duration': Extract in seconds (convert mm:ss or hh:mm:ss).
-                 - 'calories': Extract as number.
-              3. For STRENGTH (weight machines):
-                 - 'name': Name of the exercise.
-                 - 'sets': Number of sets.
-                 - 'reps': Number of reps per set.
-                 - 'weight': Weight in lbs (convert kg to lbs if needed, 1kg = 2.2lbs).
-              4. Return a JSON object matching the schema.
-              5. If multiple exercises are visible, include all of them.
-              6. If data is unclear, make your best guess or omit the specific field.` },
-              {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: base64Data
-                }
-              }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              notes: { type: Type.STRING },
-              exercises: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER },
-                    reps: { type: Type.NUMBER },
-                    weight: { type: Type.NUMBER },
-                    distance: { type: Type.NUMBER },
-                    duration: { type: Type.NUMBER },
-                    calories: { type: Type.NUMBER }
-                  },
-                  required: ["name"]
-                }
-              }
-            },
-            required: ["exercises"]
-          }
-        }
+
+      const response = await fetch('/api/ai/parse-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: base64Data }),
       });
 
-      const workoutData = JSON.parse(response.text);
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to analyze image');
+      }
+
+      const workoutData = await response.json();
       if (!workoutData.exercises || workoutData.exercises.length === 0) {
         throw new Error("No workout data detected. Please try a clearer photo of the machine screen.");
       }

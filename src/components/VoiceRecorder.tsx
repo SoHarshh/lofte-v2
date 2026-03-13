@@ -1,7 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Keyboard, Send, MessageSquareText } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Mic, Square, Loader2, CheckCircle2, AlertCircle, Keyboard, Send } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 
 interface VoiceRecorderProps {
   onDataExtracted: (data: any) => void;
@@ -79,51 +78,18 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onDataExtracted })
         };
       });
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            parts: [
-              { text: "Extract workout data from this audio. Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array." },
-              {
-                inlineData: {
-                  mimeType: "audio/webm",
-                  data: base64Audio
-                }
-              }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              date: { type: Type.STRING },
-              notes: { type: Type.STRING },
-              exercises: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER },
-                    reps: { type: Type.NUMBER },
-                    weight: { type: Type.NUMBER }
-                  },
-                  required: ["name", "sets", "reps", "weight"]
-                }
-              }
-            },
-            required: ["date", "exercises"]
-          }
-        }
+      const response = await fetch('/api/ai/parse-workout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64: base64Audio, mimeType: 'audio/webm' }),
       });
 
-      const workoutData = JSON.parse(response.text);
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to process audio');
+      }
+
+      const workoutData = await response.json();
       await processWorkoutData(workoutData);
     } catch (err: any) {
       console.error('Error processing audio:', err);
@@ -143,45 +109,18 @@ export const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onDataExtracted })
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [
-          {
-            parts: [
-              { text: `Extract workout data from this text: "${textInput}". Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array.` }
-            ]
-          }
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              date: { type: Type.STRING },
-              notes: { type: Type.STRING },
-              exercises: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING },
-                    muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER },
-                    reps: { type: Type.NUMBER },
-                    weight: { type: Type.NUMBER }
-                  },
-                  required: ["name", "sets", "reps", "weight"]
-                }
-              }
-            },
-            required: ["date", "exercises"]
-          }
-        }
+      const response = await fetch('/api/ai/parse-workout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: textInput }),
       });
 
-      const workoutData = JSON.parse(response.text);
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to process workout');
+      }
+
+      const workoutData = await response.json();
       await processWorkoutData(workoutData);
     } catch (err: any) {
       console.error('Error processing text:', err);

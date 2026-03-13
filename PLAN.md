@@ -40,10 +40,11 @@ Move AI logic to backend so:
 
 **New backend routes:**
 
-- [ ] `POST /api/ai/process-voice` — accepts `{ audioBase64, mimeType }`, returns parsed `{ exercises, notes }`
-- [ ] `POST /api/ai/process-image` — accepts `{ imageBase64 }`, returns parsed `{ exercises, notes }`
-- [ ] Frontend: `VoiceRecorder.tsx` calls `/api/ai/process-voice` instead of direct Gemini SDK
-- [ ] Frontend: `VisionLogger.tsx` calls `/api/ai/process-image` instead of direct Gemini SDK
+- [x] `POST /api/ai/parse-workout` — accepts `{ text }` or `{ audioBase64, mimeType }`, returns parsed exercises
+- [x] `POST /api/ai/parse-image` — accepts `{ imageBase64 }`, returns parsed exercises
+- [x] Frontend: `VoiceRecorder.tsx` calls `/api/ai/parse-workout` via fetch
+- [x] Frontend: `VisionLogger.tsx` calls `/api/ai/parse-image` via fetch
+- [x] Removed `GEMINI_API_KEY` from Vite bundle — key is server-side only
 
 ---
 
