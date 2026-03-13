@@ -1,4 +1,4 @@
-# AuraFit — Frictionless Workout Tracker
+# LOFTE — Frictionless Workout Tracker
 
 Voice-first workout tracking for athletes who refuse to break their flow state. Speak your set, AI logs it instantly.
 
