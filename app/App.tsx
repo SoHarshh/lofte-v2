@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { Text, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { SessionState } from './src/types';
 import DashboardScreen from './src/screens/DashboardScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
@@ -14,11 +15,11 @@ const Tab = createBottomTabNavigator();
 export const COLORS = {
   bg: '#0A0A0A',
   accent: '#7C3AED',
-  accentDim: '#4C1D95',
+  accentDim: '#3B0764',
   surface: '#141414',
-  border: '#222222',
+  border: '#1F1F1F',
   text: '#FFFFFF',
-  textDim: '#888888',
+  textDim: '#666666',
   success: '#10B981',
   danger: '#EF4444',
 };
@@ -34,23 +35,16 @@ const initialSession: SessionState = {
 export default function App() {
   const [session, setSession] = useState<SessionState>(initialSession);
 
-  const startSession = () => {
-    setSession({
-      isActive: true,
-      startTime: new Date().toISOString(),
-      transcript: [],
-      exercises: [],
-      notes: '',
-    });
-  };
+  const startSession = () => setSession({
+    isActive: true,
+    startTime: new Date().toISOString(),
+    transcript: [], exercises: [], notes: '',
+  });
 
-  const endSession = () => {
-    setSession(initialSession);
-  };
+  const endSession = () => setSession(initialSession);
 
-  const updateSession = (updates: Partial<SessionState>) => {
+  const updateSession = (updates: Partial<SessionState>) =>
     setSession(prev => ({ ...prev, ...updates }));
-  };
 
   return (
     <SafeAreaProvider>
@@ -62,20 +56,15 @@ export default function App() {
             tabBarStyle: styles.tabBar,
             tabBarActiveTintColor: COLORS.accent,
             tabBarInactiveTintColor: COLORS.textDim,
-            tabBarLabel: ({ color }) => (
-              <Text style={{ color, fontSize: 11, fontWeight: '600', marginBottom: 4 }}>
-                {route.name}
-              </Text>
-            ),
-            tabBarIcon: ({ color }) => {
-              const icons: Record<string, string> = {
-                Dashboard: '⚡',
-                Session: session.isActive ? '🔴' : '●',
-                History: '📋',
+            tabBarShowLabel: true,
+            tabBarLabelStyle: styles.tabLabel,
+            tabBarIcon: ({ color, size }) => {
+              const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
+                Dashboard: 'stats-chart',
+                Session: session.isActive ? 'radio-button-on' : 'add-circle',
+                History: 'time-outline',
               };
-              return (
-                <Text style={{ fontSize: 18 }}>{icons[route.name]}</Text>
-              );
+              return <Ionicons name={icons[route.name]} size={size} color={color} />;
             },
           })}
         >
@@ -104,10 +93,15 @@ export default function App() {
 
 const styles = StyleSheet.create({
   tabBar: {
-    backgroundColor: '#111111',
-    borderTopColor: '#222222',
+    backgroundColor: '#0F0F0F',
+    borderTopColor: '#1F1F1F',
     borderTopWidth: 1,
-    height: 85,
+    height: 88,
     paddingTop: 8,
+    paddingBottom: 8,
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

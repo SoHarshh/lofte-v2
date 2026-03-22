@@ -114,17 +114,17 @@ Already gitignored — never gets pushed.
 - Expo app created in `app/`, iOS Simulator running with hot reload
 - EAS CLI installed and logged in
 
-### 🔴 Phase A — Core Session Loop (IN PROGRESS)
-- [ ] Install dependencies (expo-av, expo-camera, react-navigation)
-- [ ] Tab navigation: Dashboard / History / Active Session
-- [ ] Port types.ts
-- [ ] PTT voice logging → `/api/ai/parse-workout`
-- [ ] Text input fallback
-- [ ] Camera logging → `/api/ai/parse-image`
-- [ ] Live transcript panel (running log, deletable entries)
-- [ ] Finish flow: transcript → AI parse → review screen → save
-- [ ] Progressive overload hints inline
-- [ ] PR flags + AI debrief on finish
+### ✅ Phase A — Core Session Loop
+- [x] Tab navigation: Dashboard / History / Active Session
+- [x] Port types.ts
+- [x] Text input → `/api/ai/parse-workout`
+- [x] Camera logging → `/api/ai/parse-image` (real device) / photo library (simulator)
+- [x] Live transcript panel (running log, deletable entries)
+- [x] Finish flow → review screen → save
+- [x] Progressive overload hints inline
+- [x] PR flags + AI debrief on finish
+- [x] Voice PTT via expo-audio (hold mic button)
+- [x] UI overhaul: Dashboard with bar chart + muscle group bars, History with tags, Session immersive dark mode
 
 ### 🟠 Phase B — Wake Word
 - [ ] Porcupine SDK integrated

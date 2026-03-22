@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, ActivityIndicator, SafeAreaView,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Pressable,
 } from 'react-native';
+import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types';
 
@@ -23,7 +26,10 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [parsedResult, setParsedResult] = useState<{ exercises: Exercise[]; notes: string } | null>(null);
   const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
   const [tick, setTick] = useState(0);
+
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   useEffect(() => {
     if (!session.isActive) return;
@@ -41,30 +47,86 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     ? Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000)
     : 0;
 
+  // --- Voice PTT (hold to record) ---
+  const startRecording = async () => {
+    try {
+      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
+      if (!granted) { Alert.alert('Microphone permission required'); return; }
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      setIsRecording(true);
+    } catch {
+      Alert.alert('Voice unavailable', 'Voice recording requires a real device. Use text input on the simulator.');
+    }
+  };
+
+  const stopRecordingAndSubmit = async () => {
+    if (!isRecording) return;
+    setIsRecording(false);
+    setIsProcessing(true);
+    try {
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri;
+      if (!uri) throw new Error('No audio');
+      const base64 = await FileSystem.readAsStringAsync(uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      const res = await fetch(`${API_BASE}/api/ai/parse-workout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/m4a' }),
+      });
+      const data = await res.json();
+      if (data.exercises?.length > 0) {
+        await addToTranscript('voice', '🎙 Voice log', data.exercises, data.notes);
+      } else {
+        Alert.alert('Nothing recognised', 'Try again or type it instead');
+      }
+    } catch {
+      Alert.alert('Failed to process voice log');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // --- Text submit ---
   const submitText = async () => {
     if (!textInput.trim()) return;
     const text = textInput.trim();
     setTextInput('');
     setIsProcessing(true);
-    await submitToAPI({ text }, 'text');
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/parse-workout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+      if (data.exercises?.length > 0) {
+        await addToTranscript('text', text, data.exercises, data.notes);
+      } else {
+        Alert.alert('Nothing recognised', 'Try describing the exercise differently');
+      }
+    } catch {
+      Alert.alert('Failed to reach backend');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  // --- Camera (native iOS camera; falls back to library on Simulator) ---
+  // --- Camera ---
   const takePhoto = async () => {
     let result: ImagePicker.ImagePickerResult;
     try {
       const { granted } = await ImagePicker.requestCameraPermissionsAsync();
       if (!granted) { Alert.alert('Camera permission required'); return; }
-      result = await ImagePicker.launchCameraAsync({
-        base64: true, quality: 0.7, allowsEditing: false,
-      });
+      result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
     } catch {
-      // Simulator has no camera — fall back to photo library
       const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!granted) { Alert.alert('Photo library permission required'); return; }
       result = await ImagePicker.launchImageLibraryAsync({
-        base64: true, quality: 0.7, mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        base64: true, quality: 0.7,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
       });
     }
     if (result.canceled || !result.assets?.[0]?.base64) return;
@@ -88,31 +150,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     }
   };
 
-  // --- Core API submit ---
-  const submitToAPI = async (
-    body: { text?: string },
-    method: 'text'
-  ) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/parse-workout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (data.exercises?.length > 0) {
-        await addToTranscript(method, body.text || '', data.exercises, data.notes);
-      } else {
-        Alert.alert('Nothing recognised', 'Try describing the exercise differently');
-      }
-    } catch {
-      Alert.alert('Failed to reach backend — is the server running?');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // --- Add to session transcript ---
+  // --- Add to transcript ---
   const addToTranscript = async (
     method: 'voice' | 'text' | 'camera',
     raw: string,
@@ -126,9 +164,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       raw,
       exercises,
     };
-
     const allExercises = [...session.exercises, ...exercises];
-
     for (const ex of exercises) {
       const key = ex.name.toLowerCase();
       if (lastPerformance[key] !== undefined) continue;
@@ -140,7 +176,6 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
         setLastPerformance(prev => ({ ...prev, [key]: null }));
       }
     }
-
     onUpdate({
       transcript: [...session.transcript, entry],
       exercises: allExercises,
@@ -158,7 +193,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     });
   };
 
-  // --- Finish session ---
+  // --- Finish ---
   const handleFinish = async () => {
     if (session.exercises.length === 0) {
       Alert.alert('No exercises logged', 'Log at least one exercise before finishing.');
@@ -178,11 +213,15 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       const result = await res.json();
 
       try {
+        const summary = session.exercises
+          .map(e => `${e.name} ${e.sets}×${e.reps}${e.weight ? ` @${e.weight}lbs` : ''}`)
+          .join(', ');
+        const prsText = result.prs?.map((p: any) => p.exerciseName).join(', ') || 'none';
         const debriefRes = await fetch(`${API_BASE}/api/ai/parse-workout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            text: `Give me a brief coaching summary (3-4 sentences) for this workout: ${session.exercises.map(e => `${e.name} ${e.sets}x${e.reps} @ ${e.weight}lbs`).join(', ')}. PRs: ${result.prs?.map((p: any) => p.exerciseName).join(', ') || 'none'}.`,
+            text: `Give a 3-sentence coaching debrief for this workout: ${summary}. PRs hit: ${prsText}. Be specific and motivating.`,
           }),
         });
         const debrief = await debriefRes.json();
@@ -191,7 +230,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
       const prNote = result.prs?.length
         ? `${result.prs.length} PR${result.prs.length > 1 ? 's' : ''} hit! 🏆`
-        : 'Session saved';
+        : 'Workout saved';
       setParsedResult({ exercises: session.exercises, notes: prNote });
       setShowReview(true);
     } catch {
@@ -208,119 +247,43 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     onEnd();
   };
 
-  const s = StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
-    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32 },
-    startBtn: {
-      backgroundColor: colors.accent, borderRadius: 24,
-      paddingVertical: 18, paddingHorizontal: 48,
-    },
-    startBtnText: { fontSize: 18, fontWeight: '800', color: '#fff' },
-    startHint: { color: colors.textDim, fontSize: 14, marginTop: 16, textAlign: 'center' },
-    sessionWrap: { flex: 1 },
-    timerBar: {
-      flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-      paddingHorizontal: 20, paddingVertical: 14,
-      borderBottomWidth: 1, borderBottomColor: colors.border,
-    },
-    timer: { fontSize: 32, fontWeight: '800', color: colors.accent },
-    finishBtn: {
-      backgroundColor: colors.success, borderRadius: 12,
-      paddingVertical: 8, paddingHorizontal: 18,
-    },
-    finishBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
-    transcript: { flex: 1 },
-    transcriptContent: { padding: 16, gap: 10 },
-    entry: {
-      backgroundColor: colors.surface, borderRadius: 12,
-      padding: 12, borderWidth: 1, borderColor: colors.border,
-      flexDirection: 'row', gap: 10,
-    },
-    entryIcon: { fontSize: 18 },
-    entryBody: { flex: 1 },
-    entryExName: { fontSize: 14, fontWeight: '600', color: colors.text },
-    entryStats: { fontSize: 13, color: colors.accent, marginTop: 2 },
-    entryLast: { fontSize: 12, color: colors.textDim, marginTop: 2 },
-    entryDelete: { padding: 4 },
-    entryDeleteText: { fontSize: 16, color: colors.danger },
-    emptyTranscript: { alignItems: 'center', marginTop: 60, paddingHorizontal: 32 },
-    emptyText: { color: colors.textDim, fontSize: 15, textAlign: 'center', marginTop: 12 },
-    inputBar: {
-      flexDirection: 'row', gap: 8, padding: 12,
-      borderTopWidth: 1, borderTopColor: colors.border,
-      backgroundColor: colors.surface,
-    },
-    textInput: {
-      flex: 1, backgroundColor: colors.bg, borderRadius: 12,
-      paddingHorizontal: 14, paddingVertical: 10,
-      color: colors.text, fontSize: 15,
-      borderWidth: 1, borderColor: colors.border,
-    },
-    iconBtn: {
-      width: 46, height: 46, borderRadius: 12,
-      alignItems: 'center', justifyContent: 'center',
-    },
-    camBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-    sendBtn: { backgroundColor: colors.accent },
-    iconBtnText: { fontSize: 20 },
-    reviewWrap: { flex: 1, backgroundColor: colors.bg, padding: 24 },
-    reviewTitle: { fontSize: 26, fontWeight: '800', color: colors.text, marginBottom: 6 },
-    reviewSub: { fontSize: 15, color: colors.accent, fontWeight: '600', marginBottom: 24 },
-    reviewCard: {
-      backgroundColor: colors.surface, borderRadius: 16,
-      padding: 16, marginBottom: 12,
-      borderWidth: 1, borderColor: colors.border,
-    },
-    reviewExName: { fontSize: 15, fontWeight: '700', color: colors.text },
-    reviewExStats: { fontSize: 14, color: colors.accent, marginTop: 4 },
-    debriefBox: {
-      backgroundColor: colors.accentDim, borderRadius: 16,
-      padding: 16, marginBottom: 24,
-    },
-    debriefLabel: { fontSize: 12, fontWeight: '700', color: colors.accent, marginBottom: 6, letterSpacing: 1 },
-    debriefText: { fontSize: 14, color: colors.text, lineHeight: 22 },
-    doneBtn: {
-      backgroundColor: colors.accent, borderRadius: 16,
-      paddingVertical: 16, alignItems: 'center', marginTop: 8,
-    },
-    doneBtnText: { fontSize: 16, fontWeight: '800', color: '#fff' },
-    processingOverlay: {
-      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-      backgroundColor: 'rgba(0,0,0,0.6)', alignItems: 'center', justifyContent: 'center',
-    },
-    processingText: { color: '#fff', fontSize: 15, marginTop: 12 },
-  });
+  const styles = s(colors);
+  const methodIcon = (m: string): keyof typeof Ionicons.glyphMap =>
+    ({ voice: 'mic', camera: 'camera', text: 'pencil' }[m] ?? 'pencil') as keyof typeof Ionicons.glyphMap;
 
-  const methodIcon = (m: string) => m === 'camera' ? '📸' : '⌨️';
-
-  // --- Review Screen ---
+  // --- Review ---
   if (showReview && parsedResult) {
     return (
-      <SafeAreaView style={s.safe}>
-        <ScrollView style={s.reviewWrap}>
-          <Text style={s.reviewTitle}>Session Complete 💪</Text>
-          <Text style={s.reviewSub}>{parsedResult.notes}</Text>
+      <SafeAreaView style={styles.safe}>
+        <ScrollView
+          contentContainerStyle={styles.reviewContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.reviewTitle}>Session Complete</Text>
+          <Text style={styles.reviewSub}>{parsedResult.notes}</Text>
 
           {aiDebrief && (
-            <View style={s.debriefBox}>
-              <Text style={s.debriefLabel}>LOFTE COACH</Text>
-              <Text style={s.debriefText}>{aiDebrief}</Text>
+            <View style={styles.debriefBox}>
+              <Text style={styles.debriefLabel}>LOFTE COACH</Text>
+              <Text style={styles.debriefText}>{aiDebrief}</Text>
             </View>
           )}
 
+          <Text style={styles.sectionLabel}>EXERCISES</Text>
           {parsedResult.exercises.map((ex, i) => (
-            <View key={i} style={s.reviewCard}>
-              <Text style={s.reviewExName}>{ex.name}</Text>
-              <Text style={s.reviewExStats}>
+            <View key={i} style={styles.reviewCard}>
+              <Text style={styles.reviewExName}>{ex.name}</Text>
+              <Text style={styles.reviewExStats}>
                 {ex.sets && ex.reps
                   ? `${ex.sets} sets × ${ex.reps} reps${ex.weight ? ` @ ${ex.weight} lbs` : ''}`
-                  : ex.distance ? `${ex.distance}m` : ex.duration ? `${Math.round(ex.duration / 60)} min` : '—'}
+                  : ex.distance ? `${ex.distance}m`
+                  : ex.duration ? `${Math.round(ex.duration / 60)} min` : '—'}
               </Text>
             </View>
           ))}
 
-          <TouchableOpacity style={s.doneBtn} onPress={handleDoneReview}>
-            <Text style={s.doneBtnText}>Done</Text>
+          <TouchableOpacity style={styles.doneBtn} onPress={handleDoneReview}>
+            <Text style={styles.doneBtnText}>Done</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -330,12 +293,15 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   // --- Pre-session ---
   if (!session.isActive) {
     return (
-      <SafeAreaView style={s.safe}>
-        <View style={s.center}>
-          <TouchableOpacity style={s.startBtn} onPress={onStart}>
-            <Text style={s.startBtnText}>Start Session</Text>
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.startWrap}>
+          <Text style={styles.startTitle}>Ready?</Text>
+          <Text style={styles.startSubtitle}>
+            Log by voice, text, or photo.{'\n'}AI structures your workout at the end.
+          </Text>
+          <TouchableOpacity style={styles.startBtn} onPress={onStart}>
+            <Text style={styles.startBtnText}>Start Session</Text>
           </TouchableOpacity>
-          <Text style={s.startHint}>Type a log or snap a photo of the machine display</Text>
         </View>
       </SafeAreaView>
     );
@@ -343,45 +309,54 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   // --- Active Session ---
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
-        style={s.sessionWrap}
+        style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={90}
       >
-        <View style={s.timerBar}>
-          <Text style={s.timer}>{formatTime(getElapsed())}</Text>
-          <TouchableOpacity style={s.finishBtn} onPress={handleFinish}>
-            <Text style={s.finishBtnText}>Finish</Text>
+        {/* Timer bar */}
+        <View style={styles.timerBar}>
+          <View>
+            <Text style={styles.timerLabel}>ACTIVE</Text>
+            <Text style={styles.timer}>{formatTime(getElapsed())}</Text>
+          </View>
+          <TouchableOpacity style={styles.finishBtn} onPress={handleFinish}>
+            <Text style={styles.finishBtnText}>Finish</Text>
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={s.transcript} contentContainerStyle={s.transcriptContent} showsVerticalScrollIndicator={false}>
+        {/* Transcript */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.transcriptContent}
+          showsVerticalScrollIndicator={false}
+        >
           {session.transcript.length === 0 && (
-            <View style={s.emptyTranscript}>
-              <Text style={{ fontSize: 36 }}>⌨️</Text>
-              <Text style={s.emptyText}>
-                Type a log below{'\n'}e.g. "bench 3x10 at 135 lbs"
+            <View style={styles.emptyTranscript}>
+              <Ionicons name="mic-outline" size={48} color={colors.border} />
+              <Text style={styles.emptyText}>
+                Hold mic to speak, type below,{'\n'}or tap camera for machine display
               </Text>
             </View>
           )}
           {session.transcript.map(entry => (
-            <View key={entry.id} style={s.entry}>
-              <Text style={s.entryIcon}>{methodIcon(entry.method)}</Text>
-              <View style={s.entryBody}>
+            <View key={entry.id} style={styles.entry}>
+              <Ionicons name={methodIcon(entry.method)} size={18} color={colors.textDim} style={{ marginTop: 1 }} />
+              <View style={styles.entryBody}>
                 {entry.exercises?.map((ex, i) => {
                   const key = ex.name.toLowerCase();
                   const last = lastPerformance[key];
                   return (
-                    <View key={i}>
-                      <Text style={s.entryExName}>{ex.name}</Text>
-                      <Text style={s.entryStats}>
+                    <View key={i} style={i > 0 ? { marginTop: 8 } : {}}>
+                      <Text style={styles.entryExName}>{ex.name}</Text>
+                      <Text style={styles.entryStats}>
                         {ex.sets && ex.reps
                           ? `${ex.sets}×${ex.reps}${ex.weight ? ` @ ${ex.weight}lbs` : ''}`
                           : ex.distance ? `${ex.distance}m` : '—'}
                       </Text>
                       {last?.weight && (
-                        <Text style={s.entryLast}>
+                        <Text style={styles.entryLast}>
                           Last: {last.sets}×{last.reps} @ {last.weight}lbs
                         </Text>
                       )}
@@ -389,41 +364,139 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                   );
                 })}
               </View>
-              <TouchableOpacity style={s.entryDelete} onPress={() => removeEntry(entry.id)}>
-                <Text style={s.entryDeleteText}>✕</Text>
+              <TouchableOpacity onPress={() => removeEntry(entry.id)} style={{ padding: 4 }}>
+                <Ionicons name="close" size={18} color={colors.danger} />
               </TouchableOpacity>
             </View>
           ))}
         </ScrollView>
 
-        <View style={s.inputBar}>
+        {/* Input bar */}
+        <View style={styles.inputBar}>
           <TextInput
-            style={s.textInput}
-            placeholder='e.g. "bench 3x10 at 135"'
+            style={styles.textInput}
+            placeholder='e.g. "bench 3×10 @ 135"'
             placeholderTextColor={colors.textDim}
             value={textInput}
             onChangeText={setTextInput}
             onSubmitEditing={submitText}
             returnKeyType="send"
           />
-          <TouchableOpacity style={[s.iconBtn, s.camBtn]} onPress={takePhoto}>
-            <Text style={s.iconBtnText}>📸</Text>
+          <TouchableOpacity style={[styles.iconBtn, styles.camBtn]} onPress={takePhoto}>
+            <Ionicons name="camera" size={22} color={colors.textDim} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.iconBtn, { backgroundColor: colors.accent }]}
-            onPress={submitText}
+          <Pressable
+            style={[styles.iconBtn, styles.micBtn, isRecording && styles.micBtnActive]}
+            onPressIn={startRecording}
+            onPressOut={stopRecordingAndSubmit}
           >
-            <Text style={s.iconBtnText}>↑</Text>
-          </TouchableOpacity>
+            <Ionicons name={isRecording ? 'stop' : 'mic'} size={22} color="#fff" />
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
 
       {isProcessing && (
-        <View style={s.processingOverlay}>
+        <View style={styles.overlay}>
           <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={s.processingText}>Processing…</Text>
+          <Text style={styles.overlayText}>Processing…</Text>
         </View>
       )}
     </SafeAreaView>
   );
 }
+
+const s = (colors: Record<string, string>) => StyleSheet.create({
+  safe: { flex: 1, backgroundColor: colors.bg },
+
+  // Pre-session
+  startWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 },
+  startTitle: { fontSize: 42, fontWeight: '900', color: colors.text, letterSpacing: -1 },
+  startSubtitle: { fontSize: 15, color: colors.textDim, textAlign: 'center', lineHeight: 22 },
+  startBtn: {
+    backgroundColor: colors.accent, borderRadius: 20,
+    paddingVertical: 18, paddingHorizontal: 52, marginTop: 8,
+  },
+  startBtnText: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: 0.3 },
+
+  // Timer
+  timerBar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 20, paddingVertical: 16,
+    borderBottomWidth: 1, borderBottomColor: colors.border,
+  },
+  timerLabel: { fontSize: 11, fontWeight: '700', color: colors.accent, letterSpacing: 2 },
+  timer: { fontSize: 38, fontWeight: '900', color: colors.text, letterSpacing: -1 },
+  finishBtn: {
+    backgroundColor: colors.success, borderRadius: 14,
+    paddingVertical: 10, paddingHorizontal: 20,
+  },
+  finishBtnText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+
+  // Transcript
+  transcriptContent: { padding: 16, gap: 10, flexGrow: 1 },
+  emptyTranscript: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60, gap: 12 },
+  emptyText: { color: colors.textDim, fontSize: 15, textAlign: 'center', lineHeight: 22 },
+  entry: {
+    backgroundColor: colors.surface, borderRadius: 14,
+    padding: 14, borderWidth: 1, borderColor: colors.border,
+    flexDirection: 'row', gap: 10, alignItems: 'flex-start',
+  },
+  entryBody: { flex: 1 },
+  entryExName: { fontSize: 15, fontWeight: '700', color: colors.text },
+  entryStats: { fontSize: 14, color: colors.accent, marginTop: 2, fontWeight: '600' },
+  entryLast: { fontSize: 12, color: colors.textDim, marginTop: 3 },
+
+  // Input bar
+  inputBar: {
+    flexDirection: 'row', gap: 8, padding: 12,
+    borderTopWidth: 1, borderTopColor: colors.border,
+    backgroundColor: '#111111',
+  },
+  textInput: {
+    flex: 1, backgroundColor: colors.surface, borderRadius: 14,
+    paddingHorizontal: 14, paddingVertical: 12,
+    color: colors.text, fontSize: 15,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  iconBtn: {
+    width: 48, height: 48, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  camBtn: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  micBtn: { backgroundColor: colors.accent },
+  micBtnActive: { backgroundColor: colors.danger },
+  iconTxt: { fontSize: 20 },
+
+  // Review
+  reviewContent: { padding: 24, gap: 12 },
+  reviewTitle: { fontSize: 28, fontWeight: '900', color: colors.text, letterSpacing: -0.5 },
+  reviewSub: { fontSize: 16, color: colors.accent, fontWeight: '700' },
+  debriefBox: {
+    backgroundColor: colors.accentDim, borderRadius: 16,
+    padding: 16, marginVertical: 4,
+  },
+  debriefLabel: { fontSize: 11, fontWeight: '700', color: colors.accent, letterSpacing: 1.5, marginBottom: 8 },
+  debriefText: { fontSize: 14, color: colors.text, lineHeight: 22 },
+  sectionLabel: {
+    fontSize: 11, fontWeight: '700', color: colors.textDim,
+    letterSpacing: 1.5, marginTop: 8,
+  },
+  reviewCard: {
+    backgroundColor: colors.surface, borderRadius: 14,
+    padding: 14, borderWidth: 1, borderColor: colors.border,
+  },
+  reviewExName: { fontSize: 15, fontWeight: '700', color: colors.text },
+  reviewExStats: { fontSize: 14, color: colors.accent, marginTop: 4 },
+  doneBtn: {
+    backgroundColor: colors.accent, borderRadius: 16,
+    paddingVertical: 16, alignItems: 'center', marginTop: 8,
+  },
+  doneBtnText: { fontSize: 16, fontWeight: '800', color: '#fff' },
+
+  // Processing overlay
+  overlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center', gap: 12,
+  },
+  overlayText: { color: '#fff', fontSize: 15, fontWeight: '500' },
+});
