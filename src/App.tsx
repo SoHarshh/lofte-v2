@@ -5,6 +5,8 @@ import { VisionLogger } from './components/VisionLogger';
 import { Dashboard } from './components/Dashboard';
 import { WorkoutList } from './components/WorkoutList';
 import { Modal } from './components/Modal';
+import { WorkoutResultModal } from './components/WorkoutResultModal';
+import { ExerciseHistoryModal } from './components/ExerciseHistoryModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dumbbell, LayoutDashboard, List, Plus, Play, CheckCircle2, X, History as HistoryIcon, Camera, Mic } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -26,10 +28,15 @@ export default function App() {
   const [sessionDate, setSessionDate] = useState<string | null>(null);
   const [logMode, setLogMode] = useState<'smart' | 'vision'>('smart');
 
+  // Progressive overload context: last performance per exercise name
+  const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
+
   // Modal States
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [workoutResult, setWorkoutResult] = useState<{ workoutId: number; prs: any[] } | null>(null);
+  const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
 
   const fetchWorkouts = async () => {
     try {
@@ -94,12 +101,15 @@ export default function App() {
       });
 
       if (response.ok) {
+        const result = await response.json();
         setIsWorkoutActive(false);
         setCurrentExercises([]);
         setSessionNotes('');
         setSessionDate(null);
+        setLastPerformance({});
         fetchWorkouts();
         setActiveTab('history');
+        setWorkoutResult({ workoutId: result.workoutId, prs: result.prs || [] });
       }
     } catch (error) {
       console.error('Failed to save workout:', error);
@@ -116,9 +126,21 @@ export default function App() {
     setShowDiscardModal(false);
   };
 
-  const handleDataExtracted = (data: any) => {
+  const handleDataExtracted = async (data: any) => {
     if (data.exercises) {
       setCurrentExercises(prev => [...prev, ...data.exercises]);
+      // Fetch last performance for each new exercise (for progressive overload context)
+      for (const ex of data.exercises) {
+        const key = ex.name.toLowerCase();
+        if (lastPerformance[key] !== undefined) continue;
+        try {
+          const res = await fetch(`/api/exercises/last?name=${encodeURIComponent(ex.name)}`);
+          const last = await res.json();
+          setLastPerformance(prev => ({ ...prev, [key]: last }));
+        } catch {
+          setLastPerformance(prev => ({ ...prev, [key]: null }));
+        }
+      }
     }
     if (data.notes && !sessionNotes) {
       setSessionNotes(data.notes);
@@ -177,7 +199,7 @@ export default function App() {
             transition={{ duration: 0.2 }}
           >
             {activeTab === 'dashboard' && <Dashboard workouts={workouts} />}
-            {activeTab === 'history' && <WorkoutList workouts={workouts} onDelete={handleDeleteWorkout} />}
+            {activeTab === 'history' && <WorkoutList workouts={workouts} onDelete={handleDeleteWorkout} onExerciseClick={setSelectedExercise} />}
             {activeTab === 'log' && (
               <div className="space-y-8">
                 {!isWorkoutActive ? (
@@ -291,6 +313,17 @@ export default function App() {
                                     {ex.duration && <span className="text-[10px] bg-blue-50 px-1.5 py-0.5 rounded text-blue-600 font-medium">{Math.floor(ex.duration / 60)}m {ex.duration % 60}s</span>}
                                     {ex.calories && <span className="text-[10px] bg-orange-50 px-1.5 py-0.5 rounded text-orange-600 font-medium">{ex.calories} kcal</span>}
                                   </div>
+                                  {(() => {
+                                    const last = lastPerformance[ex.name.toLowerCase()];
+                                    if (!last) return null;
+                                    return (
+                                      <p className="text-[10px] text-zinc-400 mt-1">
+                                        Last: {last.sets && last.reps ? `${last.sets}×${last.reps}` : ''}
+                                        {last.weight ? ` @ ${last.weight}lbs` : ''}
+                                        {last.distance ? ` ${(last.distance / 1000).toFixed(2)}km` : ''}
+                                      </p>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                               <button 
@@ -368,6 +401,18 @@ export default function App() {
         title="Error"
         message={errorMsg || ''}
         confirmText="OK"
+      />
+
+      <WorkoutResultModal
+        isOpen={workoutResult !== null}
+        workoutId={workoutResult?.workoutId ?? null}
+        prs={workoutResult?.prs ?? []}
+        onClose={() => setWorkoutResult(null)}
+      />
+
+      <ExerciseHistoryModal
+        exerciseName={selectedExercise}
+        onClose={() => setSelectedExercise(null)}
       />
     </div>
   );

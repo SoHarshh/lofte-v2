@@ -183,8 +183,23 @@ async function startServer() {
 
   app.post("/api/workouts", (req, res) => {
     const { date, notes, exercises } = req.body;
-    
+
     try {
+      // Snapshot current bests BEFORE inserting so we can detect PRs
+      const getBestWeight = db.prepare(
+        "SELECT MAX(weight) as maxWeight FROM exercises WHERE LOWER(name) = LOWER(?)"
+      );
+      const priorBests: Record<string, number | null> = {};
+      for (const ex of exercises) {
+        if (ex.weight) {
+          const key = ex.name.toLowerCase();
+          if (!(key in priorBests)) {
+            const row = getBestWeight.get(ex.name) as any;
+            priorBests[key] = row?.maxWeight ?? null;
+          }
+        }
+      }
+
       const insertWorkout = db.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
       const insertExercise = db.prepare(
         "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -193,25 +208,33 @@ async function startServer() {
       const transaction = db.transaction(() => {
         const info = insertWorkout.run(date, notes || "");
         const workoutId = info.lastInsertRowid;
-
         for (const ex of exercises) {
           insertExercise.run(
-            workoutId, 
-            ex.name, 
-            ex.muscleGroup || null, 
-            ex.sets ?? null, 
-            ex.reps ?? null, 
-            ex.weight ?? null,
-            ex.distance ?? null,
-            ex.duration ?? null,
-            ex.calories ?? null
+            workoutId, ex.name, ex.muscleGroup || null,
+            ex.sets ?? null, ex.reps ?? null, ex.weight ?? null,
+            ex.distance ?? null, ex.duration ?? null, ex.calories ?? null
           );
         }
         return workoutId;
       });
 
       const workoutId = transaction();
-      res.json({ success: true, workoutId });
+
+      // Detect PRs — deduplicated by exercise name (keep highest weight per exercise)
+      const prMap: Record<string, any> = {};
+      for (const ex of exercises) {
+        if (!ex.weight) continue;
+        const key = ex.name.toLowerCase();
+        const prior = priorBests[key];
+        if (prior === null || ex.weight > prior) {
+          if (!prMap[key] || ex.weight > prMap[key].weight) {
+            prMap[key] = { exerciseName: ex.name, weight: ex.weight, previous: prior };
+          }
+        }
+      }
+      const prs = Object.values(prMap);
+
+      res.json({ success: true, workoutId, prs });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to save workout" });
@@ -225,6 +248,82 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to delete workout" });
+    }
+  });
+
+  // Last performance for an exercise (for progressive overload context)
+  app.get("/api/exercises/last", (req, res) => {
+    const { name } = req.query as { name: string };
+    if (!name) return res.status(400).json({ error: "name is required" });
+    try {
+      const row = db.prepare(`
+        SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
+        FROM exercises e
+        JOIN workouts w ON e.workout_id = w.id
+        WHERE LOWER(e.name) = LOWER(?)
+        ORDER BY w.date DESC
+        LIMIT 1
+      `).get(name) as any;
+      res.json(row || null);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch last performance" });
+    }
+  });
+
+  // Full history for an exercise (for drill-down chart)
+  app.get("/api/exercises/history", (req, res) => {
+    const { name } = req.query as { name: string };
+    if (!name) return res.status(400).json({ error: "name is required" });
+    try {
+      const rows = db.prepare(`
+        SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
+        FROM exercises e
+        JOIN workouts w ON e.workout_id = w.id
+        WHERE LOWER(e.name) = LOWER(?)
+        ORDER BY w.date ASC
+      `).all(name) as any[];
+      res.json(rows);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch exercise history" });
+    }
+  });
+
+  // Post-workout AI summary
+  app.post("/api/workouts/:id/summary", async (req, res) => {
+    const { prs = [] } = req.body;
+    try {
+      const workout = db.prepare("SELECT * FROM workouts WHERE id = ?").get(req.params.id) as any;
+      if (!workout) return res.status(404).json({ error: "Workout not found" });
+
+      const exercises = db.prepare("SELECT * FROM exercises WHERE workout_id = ?").all(req.params.id) as any[];
+
+      const exerciseLines = exercises.map((ex: any) => {
+        if (ex.weight) return `${ex.name}: ${ex.sets}×${ex.reps} @ ${ex.weight}lbs`;
+        if (ex.distance) return `${ex.name}: ${(ex.distance / 1000).toFixed(2)}km in ${Math.floor((ex.duration || 0) / 60)}min`;
+        return ex.name;
+      }).join("; ");
+
+      const prLine = prs.length > 0
+        ? `New PRs hit: ${(prs as any[]).map((p: any) => `${p.exerciseName} at ${p.weight}lbs`).join(", ")}.`
+        : "";
+
+      const prompt = `You are a concise, motivating fitness coach. Write a 2-3 sentence post-workout recap for this session.
+
+Exercises: ${exerciseLines}
+${prLine}
+
+Rules: Be specific (mention actual exercises/weights). Mention PRs if present. End with one actionable tip for next session. No filler phrases like "Great job!" Keep it under 60 words.`;
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ parts: [{ text: prompt }] }],
+      });
+
+      res.json({ summary: response.text.trim() });
+    } catch (error: any) {
+      console.error("Summary error:", error);
+      res.status(500).json({ error: error.message || "Failed to generate summary" });
     }
   });
 
