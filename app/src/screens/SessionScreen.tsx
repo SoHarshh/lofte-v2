@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, ActivityIndicator, SafeAreaView,
-  KeyboardAvoidingView, Platform, Pressable,
+  KeyboardAvoidingView, Platform, Pressable, ActionSheetIOS,
 } from 'react-native';
 import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
@@ -115,13 +115,31 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   };
 
   // --- Camera ---
-  const takePhoto = async () => {
+  const takePhoto = () => {
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: ['Cancel', 'Take Photo', 'Choose from Library'],
+        cancelButtonIndex: 0,
+      },
+      (idx) => {
+        if (idx === 1) launchPhoto(true);
+        if (idx === 2) launchPhoto(false);
+      }
+    );
+  };
+
+  const launchPhoto = async (useCamera: boolean) => {
     let result: ImagePicker.ImagePickerResult;
-    try {
+    if (useCamera) {
       const { granted } = await ImagePicker.requestCameraPermissionsAsync();
       if (!granted) { Alert.alert('Camera permission required'); return; }
-      result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
-    } catch {
+      try {
+        result = await ImagePicker.launchCameraAsync({ base64: true, quality: 0.7 });
+      } catch {
+        Alert.alert('Camera unavailable', 'Use "Choose from Library" on the simulator.');
+        return;
+      }
+    } else {
       const { granted } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!granted) { Alert.alert('Photo library permission required'); return; }
       result = await ImagePicker.launchImageLibraryAsync({
@@ -248,6 +266,19 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   };
 
   const styles = s(colors);
+  const formatExStats = (ex: Exercise) => {
+    const hasCardio = ex.distance || ex.duration;
+    const hasWeight = ex.weight && ex.weight > 0;
+    const hasSetsReps = ex.sets && ex.reps && (ex.sets > 1 || ex.reps > 1);
+    if (hasCardio && !hasWeight) {
+      if (ex.distance) return `${(ex.distance / 1609).toFixed(1)} mi`;
+      if (ex.duration) return `${Math.round(ex.duration / 60)} min`;
+    }
+    if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+    if (hasWeight) return `${ex.weight} lbs`;
+    return '—';
+  };
+
   const methodIcon = (m: string): keyof typeof Ionicons.glyphMap =>
     ({ voice: 'mic', camera: 'camera', text: 'pencil' }[m] ?? 'pencil') as keyof typeof Ionicons.glyphMap;
 
@@ -258,6 +289,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
         <ScrollView
           contentContainerStyle={styles.reviewContent}
           showsVerticalScrollIndicator={false}
+          showsHorizontalScrollIndicator={false}
         >
           <Text style={styles.reviewTitle}>Session Complete</Text>
           <Text style={styles.reviewSub}>{parsedResult.notes}</Text>
@@ -273,12 +305,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           {parsedResult.exercises.map((ex, i) => (
             <View key={i} style={styles.reviewCard}>
               <Text style={styles.reviewExName}>{ex.name}</Text>
-              <Text style={styles.reviewExStats}>
-                {ex.sets && ex.reps
-                  ? `${ex.sets} sets × ${ex.reps} reps${ex.weight ? ` @ ${ex.weight} lbs` : ''}`
-                  : ex.distance ? `${ex.distance}m`
-                  : ex.duration ? `${Math.round(ex.duration / 60)} min` : '—'}
-              </Text>
+              <Text style={styles.reviewExStats}>{formatExStats(ex)}</Text>
             </View>
           ))}
 
@@ -350,11 +377,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                   return (
                     <View key={i} style={i > 0 ? { marginTop: 8 } : {}}>
                       <Text style={styles.entryExName}>{ex.name}</Text>
-                      <Text style={styles.entryStats}>
-                        {ex.sets && ex.reps
-                          ? `${ex.sets}×${ex.reps}${ex.weight ? ` @ ${ex.weight}lbs` : ''}`
-                          : ex.distance ? `${ex.distance}m` : '—'}
-                      </Text>
+                      <Text style={styles.entryStats}>{formatExStats(ex)}</Text>
                       {last?.weight && (
                         <Text style={styles.entryLast}>
                           Last: {last.sets}×{last.reps} @ {last.weight}lbs

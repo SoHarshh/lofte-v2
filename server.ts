@@ -34,9 +34,13 @@ db.exec(`
     distance REAL,
     duration REAL,
     calories REAL,
+    pace TEXT,
     FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE CASCADE
   );
 `);
+
+// Migrate existing DB — add pace column if not present
+try { db.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch { /* already exists */ }
 
 async function startServer() {
   const app = express();
@@ -51,11 +55,24 @@ async function startServer() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const parts: any[] = [];
 
+      const systemPrompt = `You are a workout logging assistant. Extract exercises from the input.
+
+RULES:
+- For STRENGTH exercises (bench, squat, curls, pushups, etc):
+  - Fill: name, muscleGroup, sets, reps, weight (lbs). If bodyweight, weight=0.
+  - Leave distance, duration, calories, pace empty.
+- For CARDIO exercises (run, treadmill, bike, row, elliptical, swim, walk, etc):
+  - Fill: name, muscleGroup="Cardio", distance (meters — convert miles×1609, km×1000), duration (seconds), calories, pace (as a readable string e.g. "12 min/mi", "6.5 mph", "12-14 min/mi").
+  - Leave sets=0, reps=0, weight=0.
+- muscleGroup must be ONE of: Chest, Back, Shoulders, Arms, Legs, Core, Cardio, Other.
+- Normalize exercise names to proper case (e.g. "Bench Press", "Treadmill Run", "Bicep Curls").
+- If input is unrelated to exercise, return empty exercises array.`;
+
       if (audioBase64) {
-        parts.push({ text: "Extract workout data from this audio. Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array." });
-        parts.push({ inlineData: { mimeType: mimeType || "audio/webm", data: audioBase64 } });
+        parts.push({ text: systemPrompt });
+        parts.push({ inlineData: { mimeType: mimeType || "audio/m4a", data: audioBase64 } });
       } else if (text) {
-        parts.push({ text: `Extract workout data from this text: "${text}". Return a JSON object with 'date' (ISO string), 'notes' (string), and 'exercises' (array of objects with 'name', 'muscleGroup', 'sets', 'reps', 'weight'). If no workout is found, return an empty exercises array.` });
+        parts.push({ text: `${systemPrompt}\n\nInput: "${text}"` });
       } else {
         return res.status(400).json({ error: "Provide either text or audioBase64" });
       }
@@ -80,12 +97,16 @@ async function startServer() {
                     sets: { type: Type.NUMBER },
                     reps: { type: Type.NUMBER },
                     weight: { type: Type.NUMBER },
+                    distance: { type: Type.NUMBER },
+                    duration: { type: Type.NUMBER },
+                    calories: { type: Type.NUMBER },
+                    pace: { type: Type.STRING },
                   },
-                  required: ["name", "sets", "reps", "weight"],
+                  required: ["name"],
                 },
               },
             },
-            required: ["date", "exercises"],
+            required: ["exercises"],
           },
         },
       });

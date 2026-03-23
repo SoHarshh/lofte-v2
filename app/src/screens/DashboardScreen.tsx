@@ -106,6 +106,7 @@ export default function DashboardScreen({ colors }: Props) {
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        showsHorizontalScrollIndicator={false}
       >
         {/* Header */}
         <View style={styles.header}>
