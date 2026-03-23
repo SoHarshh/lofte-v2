@@ -134,13 +134,20 @@ export default function HistoryScreen({ colors }: Props) {
                       <View style={styles.exBody}>
                         <Text style={styles.exName}>{ex.name}</Text>
                         <Text style={styles.exStats}>
-                          {ex.sets && ex.reps
-                            ? `${ex.sets} × ${ex.reps}${ex.weight ? ` @ ${ex.weight} lbs` : ''}`
-                            : ex.distance
-                            ? `${ex.distance}m`
-                            : ex.duration
-                            ? `${Math.round(ex.duration / 60)} min`
-                            : '—'}
+                          {(() => {
+                            const hasCardio = ex.distance || ex.duration;
+                            const hasWeight = ex.weight && ex.weight > 0;
+                            const hasSetsReps = ex.sets && ex.reps && (ex.sets > 1 || ex.reps > 1);
+                            if (hasCardio && !hasWeight) {
+                              const parts: string[] = [];
+                              if (ex.distance) parts.push(`${(ex.distance / 1609).toFixed(1)} mi`);
+                              if (ex.duration) parts.push(`${Math.round(ex.duration / 60)} min`);
+                              if (ex.pace) parts.push(ex.pace);
+                              return parts.join(' · ') || '—';
+                            }
+                            if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+                            return '—';
+                          })()}
                         </Text>
                       </View>
                     </View>

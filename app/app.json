@@ -1,34 +1,36 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "LOFTE",
+    "slug": "lofte",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0A0A0A"
     },
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.soharshh.app"
-    },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "predictiveBackGestureEnabled": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.soharshh.lofte",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "LOFTE uses the microphone to log workouts by voice.",
+        "NSCameraUsageDescription": "LOFTE uses the camera to scan gym machine displays.",
+        "NSPhotoLibraryUsageDescription": "LOFTE can read photos to log workout data from machine displays."
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-audio"
-    ]
+      "expo-audio",
+      "expo-image-picker"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
   }
 }

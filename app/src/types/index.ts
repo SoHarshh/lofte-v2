@@ -9,6 +9,7 @@ export interface Exercise {
   distance?: number;
   duration?: number;
   calories?: number;
+  pace?: string;
 }
 
 export interface Workout {

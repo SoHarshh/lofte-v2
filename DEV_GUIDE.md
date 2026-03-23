@@ -37,6 +37,11 @@ iOS Simulator opens with hot reload. Every file save updates the app instantly.
 
 > If simulator is already open, just press `i` in the Expo terminal to relaunch it.
 
+**IMPORTANT — when to use which command:**
+- `npx expo start --ios` → use this 95% of the time (fast, seconds)
+- `npx expo run:ios` → only when you install a NEW native package (slow, ~8 min compile)
+- `rm -rf ios && npx expo run:ios` → only if the build is broken and needs a full reset
+
 ---
 
 ## Git — Push to Your Repo

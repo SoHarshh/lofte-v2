@@ -214,7 +214,14 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   // --- Finish ---
   const handleFinish = async () => {
     if (session.exercises.length === 0) {
-      Alert.alert('No exercises logged', 'Log at least one exercise before finishing.');
+      Alert.alert(
+        'Discard session?',
+        'No exercises logged. Do you want to discard this session?',
+        [
+          { text: 'Keep Going', style: 'cancel' },
+          { text: 'Discard', style: 'destructive', onPress: onEnd },
+        ]
+      );
       return;
     }
     setIsProcessing(true);
@@ -271,8 +278,12 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     const hasWeight = ex.weight && ex.weight > 0;
     const hasSetsReps = ex.sets && ex.reps && (ex.sets > 1 || ex.reps > 1);
     if (hasCardio && !hasWeight) {
-      if (ex.distance) return `${(ex.distance / 1609).toFixed(1)} mi`;
-      if (ex.duration) return `${Math.round(ex.duration / 60)} min`;
+      const parts: string[] = [];
+      if (ex.distance) parts.push(`${(ex.distance / 1609).toFixed(1)} mi`);
+      if (ex.duration) parts.push(`${Math.round(ex.duration / 60)} min`);
+      if (ex.pace) parts.push(ex.pace);
+      if (ex.calories) parts.push(`${ex.calories} cal`);
+      return parts.join(' · ') || '—';
     }
     if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
     if (hasWeight) return `${ex.weight} lbs`;

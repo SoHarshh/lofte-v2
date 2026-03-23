@@ -55,18 +55,21 @@ async function startServer() {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const parts: any[] = [];
 
-      const systemPrompt = `You are a workout logging assistant. Extract exercises from the input.
+      const systemPrompt = `Extract workout exercises from the input and return structured data.
 
-RULES:
-- For STRENGTH exercises (bench, squat, curls, pushups, etc):
-  - Fill: name, muscleGroup, sets, reps, weight (lbs). If bodyweight, weight=0.
-  - Leave distance, duration, calories, pace empty.
-- For CARDIO exercises (run, treadmill, bike, row, elliptical, swim, walk, etc):
-  - Fill: name, muscleGroup="Cardio", distance (meters — convert miles×1609, km×1000), duration (seconds), calories, pace (as a readable string e.g. "12 min/mi", "6.5 mph", "12-14 min/mi").
-  - Leave sets=0, reps=0, weight=0.
-- muscleGroup must be ONE of: Chest, Back, Shoulders, Arms, Legs, Core, Cardio, Other.
-- Normalize exercise names to proper case (e.g. "Bench Press", "Treadmill Run", "Bicep Curls").
-- If input is unrelated to exercise, return empty exercises array.`;
+For cardio exercises (running, treadmill, cycling, rowing, swimming, walking, elliptical):
+- Set muscleGroup to "Cardio"
+- Set distance in meters (1 mile = 1609m, 1 km = 1000m)
+- Set duration in seconds
+- Set pace as a readable string like "12 min/mi" or "6.5 mph" or "12-14 min/mi"
+- Set sets and reps to 0, weight to 0
+
+For strength exercises (bench press, squats, curls, pushups, rows, etc):
+- Set muscleGroup to the muscle worked: Chest, Back, Shoulders, Arms, Legs, Core
+- Set sets, reps, weight in lbs (bodyweight = 0)
+- Leave distance, duration, pace empty
+
+Always normalize exercise names to proper case. Return empty exercises array only if the input contains no exercise information.`;
 
       if (audioBase64) {
         parts.push({ text: systemPrompt });
@@ -223,7 +226,7 @@ RULES:
 
       const insertWorkout = db.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
       const insertExercise = db.prepare(
-        "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
 
       const transaction = db.transaction(() => {
@@ -233,7 +236,8 @@ RULES:
           insertExercise.run(
             workoutId, ex.name, ex.muscleGroup || null,
             ex.sets ?? null, ex.reps ?? null, ex.weight ?? null,
-            ex.distance ?? null, ex.duration ?? null, ex.calories ?? null
+            ex.distance ?? null, ex.duration ?? null, ex.calories ?? null,
+            ex.pace ?? null
           );
         }
         return workoutId;
