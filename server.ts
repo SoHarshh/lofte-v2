@@ -1,5 +1,6 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
+import { createClient } from "@supabase/supabase-js";
 import Database from "better-sqlite3";
 import dotenv from "dotenv";
 import path from "path";
@@ -11,41 +12,164 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("workouts.db");
+// ─── Storage layer ────────────────────────────────────────────────────────────
+// Uses Supabase when credentials are present, otherwise falls back to SQLite.
 
-// Initialize database
-db.exec(`
-  CREATE TABLE IF NOT EXISTS workouts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL,
-    notes TEXT
+const supabaseUrl = process.env.SUPABASE_URL ?? '';
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY ?? '';
+const USE_SUPABASE = supabaseUrl.startsWith('https://') && supabaseKey.length > 20;
+
+let supabase: ReturnType<typeof createClient> | null = null;
+let sqlite: Database.Database | null = null;
+
+if (USE_SUPABASE) {
+  supabase = createClient(supabaseUrl, supabaseKey);
+  console.log('Storage: Supabase');
+} else {
+  sqlite = new Database("workouts.db");
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS workouts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL,
+      notes TEXT
+    );
+    CREATE TABLE IF NOT EXISTS exercises (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workout_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      muscle_group TEXT,
+      sets INTEGER, reps INTEGER, weight REAL,
+      distance REAL, duration REAL, calories REAL, pace TEXT,
+      FOREIGN KEY (workout_id) REFERENCES workouts(id) ON DELETE CASCADE
+    );
+  `);
+  try { sqlite.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch {}
+  console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
+}
+
+function mapExercise(ex: any) {
+  return { ...ex, muscleGroup: ex.muscle_group ?? ex.muscleGroup };
+}
+
+// ─── DB helpers ───────────────────────────────────────────────────────────────
+
+async function dbGetWorkouts() {
+  if (USE_SUPABASE && supabase) {
+    const { data: workouts, error: wErr } = await supabase.from("workouts").select("*").order("date", { ascending: false });
+    if (wErr) throw wErr;
+    const { data: exercises, error: eErr } = await supabase.from("exercises").select("*");
+    if (eErr) throw eErr;
+    return (workouts || []).map((w: any) => ({
+      ...w,
+      exercises: (exercises || []).filter((e: any) => e.workout_id === w.id).map(mapExercise),
+    }));
+  }
+  const workouts = sqlite!.prepare("SELECT * FROM workouts ORDER BY date DESC").all();
+  const exercises = sqlite!.prepare("SELECT * FROM exercises").all();
+  return workouts.map((w: any) => ({
+    ...w,
+    exercises: (exercises as any[]).filter(e => e.workout_id === w.id).map(mapExercise),
+  }));
+}
+
+async function dbSaveWorkout(date: string, notes: string, exercises: any[]) {
+  if (USE_SUPABASE && supabase) {
+    // Snapshot prior bests
+    const priorBests: Record<string, number | null> = {};
+    for (const ex of exercises.filter(e => e.weight)) {
+      const key = ex.name.toLowerCase();
+      if (key in priorBests) continue;
+      const { data } = await supabase.from("exercises").select("weight").ilike("name", key).order("weight", { ascending: false }).limit(1);
+      priorBests[key] = data?.[0]?.weight ?? null;
+    }
+    const { data: workout, error: wErr } = await supabase.from("workouts").insert({ date, notes: notes || "" }).select().single();
+    if (wErr) throw wErr;
+    if (exercises.length > 0) {
+      const { error: eErr } = await supabase.from("exercises").insert(
+        exercises.map(ex => ({
+          workout_id: workout.id, name: ex.name, muscle_group: ex.muscleGroup || null,
+          sets: ex.sets ?? null, reps: ex.reps ?? null, weight: ex.weight ?? null,
+          distance: ex.distance ?? null, duration: ex.duration ?? null,
+          calories: ex.calories ?? null, pace: ex.pace ?? null,
+        }))
+      );
+      if (eErr) throw eErr;
+    }
+    return { workoutId: workout.id, priorBests };
+  }
+
+  // SQLite
+  const getBest = sqlite!.prepare("SELECT MAX(weight) as maxWeight FROM exercises WHERE LOWER(name) = LOWER(?)");
+  const priorBests: Record<string, number | null> = {};
+  for (const ex of exercises.filter(e => e.weight)) {
+    const key = ex.name.toLowerCase();
+    if (key in priorBests) continue;
+    const row = getBest.get(ex.name) as any;
+    priorBests[key] = row?.maxWeight ?? null;
+  }
+  const insertWorkout = sqlite!.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
+  const insertEx = sqlite!.prepare(
+    "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
-`);
+  let workoutId: any;
+  sqlite!.transaction(() => {
+    const info = insertWorkout.run(date, notes || "");
+    workoutId = info.lastInsertRowid;
+    for (const ex of exercises) {
+      insertEx.run(workoutId, ex.name, ex.muscleGroup || null, ex.sets ?? null, ex.reps ?? null,
+        ex.weight ?? null, ex.distance ?? null, ex.duration ?? null, ex.calories ?? null, ex.pace ?? null);
+    }
+  })();
+  return { workoutId, priorBests };
+}
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workout_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    muscle_group TEXT,
-    sets INTEGER,
-    reps INTEGER,
-    weight REAL,
-    distance REAL,
-    duration REAL,
-    calories REAL,
-    pace TEXT,
-    FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE CASCADE
-  );
-`);
+async function dbDeleteWorkout(id: string) {
+  if (USE_SUPABASE && supabase) {
+    const { error } = await supabase.from("workouts").delete().eq("id", id);
+    if (error) throw error;
+    return;
+  }
+  sqlite!.prepare("DELETE FROM workouts WHERE id = ?").run(id);
+}
 
-// Migrate existing DB — add pace column if not present
-try { db.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch { /* already exists */ }
+async function dbGetLastExercise(name: string) {
+  if (USE_SUPABASE && supabase) {
+    const { data } = await supabase.from("exercises")
+      .select("sets, reps, weight, distance, duration, calories, workouts(date)")
+      .ilike("name", name).order("workout_id", { ascending: false }).limit(1);
+    if (!data?.[0]) return null;
+    const r = data[0] as any;
+    return { sets: r.sets, reps: r.reps, weight: r.weight, distance: r.distance, duration: r.duration, calories: r.calories, date: r.workouts?.date };
+  }
+  const row = sqlite!.prepare(`
+    SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
+    FROM exercises e JOIN workouts w ON e.workout_id = w.id
+    WHERE LOWER(e.name) = LOWER(?) ORDER BY w.date DESC LIMIT 1
+  `).get(name) as any;
+  return row || null;
+}
+
+async function dbGetWorkoutById(id: string) {
+  if (USE_SUPABASE && supabase) {
+    const { data } = await supabase.from("workouts").select("*").eq("id", id).single();
+    return data;
+  }
+  return sqlite!.prepare("SELECT * FROM workouts WHERE id = ?").get(id);
+}
+
+async function dbGetExercisesByWorkout(id: string) {
+  if (USE_SUPABASE && supabase) {
+    const { data } = await supabase.from("exercises").select("*").eq("workout_id", id);
+    return data || [];
+  }
+  return sqlite!.prepare("SELECT * FROM exercises WHERE workout_id = ?").all(id);
+}
+
+// ─── Server ───────────────────────────────────────────────────────────────────
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
   app.use(express.json({ limit: "20mb" }));
 
   // AI Routes
@@ -54,17 +178,16 @@ async function startServer() {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const parts: any[] = [];
-
       const systemPrompt = `Extract workout exercises from the input and return structured data.
 
 For cardio exercises (running, treadmill, cycling, rowing, swimming, walking, elliptical):
 - Set muscleGroup to "Cardio"
 - Set distance in meters (1 mile = 1609m, 1 km = 1000m)
 - Set duration in seconds
-- Set pace as a readable string like "12 min/mi" or "6.5 mph" or "12-14 min/mi"
+- Set pace as a readable string like "12 min/mi" or "6.5 mph"
 - Set sets and reps to 0, weight to 0
 
-For strength exercises (bench press, squats, curls, pushups, rows, etc):
+For strength exercises:
 - Set muscleGroup to the muscle worked: Chest, Back, Shoulders, Arms, Legs, Core
 - Set sets, reps, weight in lbs (bodyweight = 0)
 - Leave distance, duration, pace empty
@@ -95,15 +218,10 @@ Always normalize exercise names to proper case. Return empty exercises array onl
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    name: { type: Type.STRING },
-                    muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER },
-                    reps: { type: Type.NUMBER },
-                    weight: { type: Type.NUMBER },
-                    distance: { type: Type.NUMBER },
-                    duration: { type: Type.NUMBER },
-                    calories: { type: Type.NUMBER },
-                    pace: { type: Type.STRING },
+                    name: { type: Type.STRING }, muscleGroup: { type: Type.STRING },
+                    sets: { type: Type.NUMBER }, reps: { type: Type.NUMBER }, weight: { type: Type.NUMBER },
+                    distance: { type: Type.NUMBER }, duration: { type: Type.NUMBER },
+                    calories: { type: Type.NUMBER }, pace: { type: Type.STRING },
                   },
                   required: ["name"],
                 },
@@ -113,7 +231,6 @@ Always normalize exercise names to proper case. Return empty exercises array onl
           },
         },
       });
-
       res.json(JSON.parse(response.text));
     } catch (error: any) {
       console.error("AI parse-workout error:", error);
@@ -125,29 +242,12 @@ Always normalize exercise names to proper case. Return empty exercises array onl
     const { imageBase64 } = req.body;
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: [{
-          parts: [
-            { text: `Extract workout data from this gym machine summary image.
-              The image could be from a treadmill, elliptical, rower, or a strength machine.
-              Rules:
-              1. Identify the machine type and put it in 'notes'.
-              2. For CARDIO (treadmill, etc.):
-                 - 'distance': Extract in meters (convert km to 1000m, miles to 1609m).
-                 - 'duration': Extract in seconds (convert mm:ss or hh:mm:ss).
-                 - 'calories': Extract as number.
-              3. For STRENGTH (weight machines):
-                 - 'name': Name of the exercise.
-                 - 'sets': Number of sets.
-                 - 'reps': Number of reps per set.
-                 - 'weight': Weight in lbs (convert kg to lbs if needed, 1kg = 2.2lbs).
-              4. If multiple exercises are visible, include all of them.
-              5. If data is unclear, make your best guess or omit the specific field.` },
-            { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
-          ],
-        }],
+        contents: [{ parts: [
+          { text: `Extract workout data from this gym machine summary image. Identify the machine type in 'notes'. For CARDIO: distance in meters, duration in seconds, calories. For STRENGTH: sets, reps, weight in lbs. If unclear, best guess or omit.` },
+          { inlineData: { mimeType: "image/jpeg", data: imageBase64 } },
+        ]}],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -159,14 +259,9 @@ Always normalize exercise names to proper case. Return empty exercises array onl
                 items: {
                   type: Type.OBJECT,
                   properties: {
-                    name: { type: Type.STRING },
-                    muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER },
-                    reps: { type: Type.NUMBER },
-                    weight: { type: Type.NUMBER },
-                    distance: { type: Type.NUMBER },
-                    duration: { type: Type.NUMBER },
-                    calories: { type: Type.NUMBER },
+                    name: { type: Type.STRING }, muscleGroup: { type: Type.STRING },
+                    sets: { type: Type.NUMBER }, reps: { type: Type.NUMBER }, weight: { type: Type.NUMBER },
+                    distance: { type: Type.NUMBER }, duration: { type: Type.NUMBER }, calories: { type: Type.NUMBER },
                   },
                   required: ["name"],
                 },
@@ -176,7 +271,6 @@ Always normalize exercise names to proper case. Return empty exercises array onl
           },
         },
       });
-
       res.json(JSON.parse(response.text));
     } catch (error: any) {
       console.error("AI parse-image error:", error);
@@ -184,167 +278,103 @@ Always normalize exercise names to proper case. Return empty exercises array onl
     }
   });
 
-  // API Routes
-  app.get("/api/workouts", (req, res) => {
+  // Workout routes
+  app.get("/api/workouts", async (req, res) => {
     try {
-      const workouts = db.prepare("SELECT * FROM workouts ORDER BY date DESC").all();
-      const exercises = db.prepare("SELECT * FROM exercises").all();
-
-      const workoutsWithExercises = workouts.map((workout: any) => ({
-        ...workout,
-        exercises: exercises.filter((ex: any) => ex.workout_id === workout.id).map((ex: any) => ({
-          ...ex,
-          muscleGroup: ex.muscle_group
-        })),
-      }));
-
-      res.json(workoutsWithExercises);
-    } catch (error) {
+      res.json(await dbGetWorkouts());
+    } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch workouts" });
     }
   });
 
-  app.post("/api/workouts", (req, res) => {
+  app.post("/api/workouts", async (req, res) => {
     const { date, notes, exercises } = req.body;
-
     try {
-      // Snapshot current bests BEFORE inserting so we can detect PRs
-      const getBestWeight = db.prepare(
-        "SELECT MAX(weight) as maxWeight FROM exercises WHERE LOWER(name) = LOWER(?)"
-      );
-      const priorBests: Record<string, number | null> = {};
-      for (const ex of exercises) {
-        if (ex.weight) {
-          const key = ex.name.toLowerCase();
-          if (!(key in priorBests)) {
-            const row = getBestWeight.get(ex.name) as any;
-            priorBests[key] = row?.maxWeight ?? null;
-          }
-        }
-      }
-
-      const insertWorkout = db.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
-      const insertExercise = db.prepare(
-        "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      );
-
-      const transaction = db.transaction(() => {
-        const info = insertWorkout.run(date, notes || "");
-        const workoutId = info.lastInsertRowid;
-        for (const ex of exercises) {
-          insertExercise.run(
-            workoutId, ex.name, ex.muscleGroup || null,
-            ex.sets ?? null, ex.reps ?? null, ex.weight ?? null,
-            ex.distance ?? null, ex.duration ?? null, ex.calories ?? null,
-            ex.pace ?? null
-          );
-        }
-        return workoutId;
-      });
-
-      const workoutId = transaction();
-
-      // Detect PRs — deduplicated by exercise name (keep highest weight per exercise)
+      const { workoutId, priorBests } = await dbSaveWorkout(date, notes, exercises);
       const prMap: Record<string, any> = {};
       for (const ex of exercises) {
         if (!ex.weight) continue;
         const key = ex.name.toLowerCase();
         const prior = priorBests[key];
-        if (prior === null || ex.weight > prior) {
+        if (prior === null || prior === undefined || ex.weight > prior) {
           if (!prMap[key] || ex.weight > prMap[key].weight) {
-            prMap[key] = { exerciseName: ex.name, weight: ex.weight, previous: prior };
+            prMap[key] = { exerciseName: ex.name, weight: ex.weight, previous: prior ?? null };
           }
         }
       }
-      const prs = Object.values(prMap);
-
-      res.json({ success: true, workoutId, prs });
-    } catch (error) {
+      res.json({ success: true, workoutId, prs: Object.values(prMap) });
+    } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to save workout" });
     }
   });
 
-  app.delete("/api/workouts/:id", (req, res) => {
+  app.delete("/api/workouts/:id", async (req, res) => {
     try {
-      db.prepare("DELETE FROM workouts WHERE id = ?").run(req.params.id);
+      await dbDeleteWorkout(req.params.id);
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to delete workout" });
     }
   });
 
-  // Last performance for an exercise (for progressive overload context)
-  app.get("/api/exercises/last", (req, res) => {
+  app.get("/api/exercises/last", async (req, res) => {
     const { name } = req.query as { name: string };
     if (!name) return res.status(400).json({ error: "name is required" });
     try {
-      const row = db.prepare(`
-        SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
-        FROM exercises e
-        JOIN workouts w ON e.workout_id = w.id
-        WHERE LOWER(e.name) = LOWER(?)
-        ORDER BY w.date DESC
-        LIMIT 1
-      `).get(name) as any;
-      res.json(row || null);
-    } catch (error) {
+      res.json(await dbGetLastExercise(name));
+    } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch last performance" });
     }
   });
 
-  // Full history for an exercise (for drill-down chart)
-  app.get("/api/exercises/history", (req, res) => {
+  app.get("/api/exercises/history", async (req, res) => {
     const { name } = req.query as { name: string };
     if (!name) return res.status(400).json({ error: "name is required" });
     try {
-      const rows = db.prepare(`
-        SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
-        FROM exercises e
-        JOIN workouts w ON e.workout_id = w.id
-        WHERE LOWER(e.name) = LOWER(?)
-        ORDER BY w.date ASC
-      `).all(name) as any[];
-      res.json(rows);
-    } catch (error) {
+      if (USE_SUPABASE && supabase) {
+        const { data } = await supabase.from("exercises")
+          .select("sets, reps, weight, distance, duration, calories, workouts(date)")
+          .ilike("name", name).order("workout_id", { ascending: true });
+        res.json((data || []).map((r: any) => ({ ...r, date: r.workouts?.date })));
+      } else {
+        const rows = sqlite!.prepare(`
+          SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
+          FROM exercises e JOIN workouts w ON e.workout_id = w.id
+          WHERE LOWER(e.name) = LOWER(?) ORDER BY w.date ASC
+        `).all(name);
+        res.json(rows);
+      }
+    } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch exercise history" });
     }
   });
 
-  // Post-workout AI summary
   app.post("/api/workouts/:id/summary", async (req, res) => {
     const { prs = [] } = req.body;
     try {
-      const workout = db.prepare("SELECT * FROM workouts WHERE id = ?").get(req.params.id) as any;
+      const workout = await dbGetWorkoutById(req.params.id);
       if (!workout) return res.status(404).json({ error: "Workout not found" });
-
-      const exercises = db.prepare("SELECT * FROM exercises WHERE workout_id = ?").all(req.params.id) as any[];
-
-      const exerciseLines = exercises.map((ex: any) => {
+      const exercises = await dbGetExercisesByWorkout(req.params.id);
+      const exerciseLines = (exercises as any[]).map(ex => {
         if (ex.weight) return `${ex.name}: ${ex.sets}×${ex.reps} @ ${ex.weight}lbs`;
         if (ex.distance) return `${ex.name}: ${(ex.distance / 1000).toFixed(2)}km in ${Math.floor((ex.duration || 0) / 60)}min`;
         return ex.name;
       }).join("; ");
-
       const prLine = prs.length > 0
         ? `New PRs hit: ${(prs as any[]).map((p: any) => `${p.exerciseName} at ${p.weight}lbs`).join(", ")}.`
         : "";
-
-      const prompt = `You are a concise, motivating fitness coach. Write a 2-3 sentence post-workout recap for this session.
-
+      const prompt = `You are a concise, motivating fitness coach. Write a 2-3 sentence post-workout recap.
 Exercises: ${exerciseLines}
 ${prLine}
-
-Rules: Be specific (mention actual exercises/weights). Mention PRs if present. End with one actionable tip for next session. No filler phrases like "Great job!" Keep it under 60 words.`;
-
+Rules: Be specific. Mention PRs if present. End with one actionable tip. No filler. Under 60 words.`;
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents: [{ parts: [{ text: prompt }] }],
       });
-
       res.json({ summary: response.text.trim() });
     } catch (error: any) {
       console.error("Summary error:", error);
@@ -352,24 +382,16 @@ Rules: Be specific (mention actual exercises/weights). Mention PRs if present. E
     }
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://localhost:${PORT}`));
 }
 
 startServer();

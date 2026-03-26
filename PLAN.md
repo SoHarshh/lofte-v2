@@ -152,22 +152,18 @@ Finish Session
 
 ---
 
-## Phase 0 — Native App Scaffold 🔴 NEXT
+## Phase 0 — Native App Scaffold ✅ DONE
 
-> iOS Simulator running, calling existing backend. Target: 1-2 days.
+- [x] Xcode installed + iOS Simulator working
+- [x] `npm install -g eas-cli && eas login` (logged in as @soharshh on expo.dev)
+- [x] Expo app created in `app/` with blank TypeScript template
+- [x] `npx expo start --ios` → hot reload confirmed
+- [x] `types.ts` ported from web → app (includes `pace` field)
+- [x] `fetch('http://localhost:3000/api/workouts')` confirmed working from simulator
 
-- [ ] Xcode installed + iOS Simulator working
-- [ ] Apple Developer Account active
-- [ ] `npm install -g eas-cli && eas login`
-- [ ] `npx create-expo-app@latest lofte-app --template blank-typescript`
-- [ ] Monorepo structure: `server/`, `web/`, `app/`
-- [ ] `npx expo start --ios` → hot reload confirmed
-- [ ] Port `types.ts` from web → app
-- [ ] Confirm `fetch('http://localhost:3000/api/workouts')` works from simulator
-
-**Dev workflow from this point:**
+**Dev workflow:**
 ```bash
-# Terminal 1
+# Terminal 1 — from project root
 npm run dev                        # backend on :3000
 
 # Terminal 2
@@ -176,24 +172,54 @@ cd app && npx expo start --ios     # simulator with hot reload
 
 ---
 
-## Phase A — Core Session Loop (TestFlight v0.1) 🔴
+## Phase A — Core Session Loop ✅ DONE
 
-> Full workout session works end-to-end. This is the shippable MVP. Target: 3-5 days.
-> Ship to TestFlight BEFORE building anything else. Get feedback first.
+- [x] Tab navigation: Home / Session / History (bottom tabs with Ionicons)
+- [x] PTT voice logging via `expo-audio` (replaced `expo-av` which had header incompatibility with ExpoModulesCore 55)
+- [x] Text input → `/api/ai/parse-workout`
+- [x] Camera logging via `expo-image-picker` (replaced `expo-camera` which required native build). ActionSheetIOS for camera vs library choice.
+- [x] Live transcript panel — method icons, timestamps, swipe-to-delete
+- [x] Progressive overload hints inline per exercise
+- [x] Finish flow → review screen → save → PR detection → LOFTE Coach debrief
+- [x] Dashboard with bar chart (react-native-chart-kit) + muscle group bars
+- [x] History screen with expandable cards, muscle group tags, cardio-aware display
+- [x] Cardio display: distance in miles + pace string (not sets/reps)
+- [x] Empty session → Alert with Discard option (matches web behavior)
+- [x] All emoji replaced with `@expo/vector-icons` Ionicons (emoji rendered as grey circles in native builds)
 
-- [ ] Session state: Start → active → Finish (ported from web)
-- [ ] **PTT voice logging** — tap mic → record via `expo-av` → POST to `/api/ai/parse-workout` → appends to transcript
-- [ ] **Text input fallback** — keyboard input → same parse endpoint
-- [ ] **Camera logging** — `expo-camera` → POST to `/api/ai/parse-image` → appends to transcript
-- [ ] **Live transcript panel** — running log of what's been captured, each entry deletable
-- [ ] **Finish flow** — full transcript → Gemini parses session → review/edit screen → save → PR flags + AI debrief
-- [ ] **Progressive overload hints** — "Last: 3×10 @ 80kg" shown inline per exercise
+**Key native package decisions:**
+- `expo-audio` not `expo-av` (SDK 55 compatible)
+- `expo-image-picker` not `expo-camera` (works in Expo Go + simulator)
+- `@react-navigation/native@6` + `@react-navigation/bottom-tabs@6` (v7 had ESM Metro error)
 
-**TestFlight path after Phase A:**
-```bash
-eas build --platform ios --profile preview   # cloud build, no local Xcode needed
-eas submit --platform ios                    # submits IPA to TestFlight automatically
-```
+**TestFlight status — BLOCKED:**
+- EAS build attempted but failed: Apple ID `Soni.harsh0707@gmail.com` is associated with "Fndr House, LLC" team (KNX998J7B5), not a personal team
+- Bundle ID `com.soharshh.lofte` could not be registered under that team (403 Forbidden)
+- **No credentials were stored** — clean slate when personal account is ready
+- Fix: purchase personal Apple Developer membership at developer.apple.com ($99/year), then re-run `eas build` and select the individual team
+- Once enrolled, the same Apple ID will show both Fndr House and personal team — pick personal
+
+---
+
+## UI Redesign — In Progress 🟠
+
+> Complete visual overhaul based on Figma prototype. Inspired by Oura Ring + iOS 26 liquid glass design language.
+
+**Design decisions locked:**
+- Two theme options (designer chose): Gradient Dark (`#0D0D1A` → `#1A0A2E` → `#0A0A0A`) OR Light Pastel (`#F8F7FF` with lavender tint) — implement both with a toggle in settings
+- Typography: **New York** serif for all hero numbers/titles, **SF Pro** for body/labels
+- Liquid glass on all floating surfaces: tab bar, cards, mic button, modals
+- Bottom nav: 4 tabs (Home / Session / History / + floating Coach AI button replacing +)
+- Spring physics on all transitions, parallax scroll on home hero
+
+**Screens to implement from Figma prototype:**
+- [ ] Home: Start Workout CTA + 4 score circles + volume arc gauge + weekly bar chart (interactive) + muscle coverage radial chart + last workout card + Coach insight card
+- [ ] Session: immersive black, sonar mic button, transcript panel with spring animations, finish flow
+- [ ] Session Review: PR banner, exercise list, LOFTE Coach debrief → chat entry point
+- [ ] History: filter pills + expandable cards with stagger animation
+- [ ] LOFTE Coach chat: context strip + message bubbles + input bar
+
+**When to start:** After Figma prototype is finalized and shared. Build screens one at a time, matching the prototype exactly.
 
 ---
 
@@ -209,16 +235,25 @@ eas submit --platform ios                    # submits IPA to TestFlight automat
 
 ---
 
-## Phase C — LOFTE Coach 🟠
+## Phase C — LOFTE Coach 🟠 NEXT BACKEND WORK
 
 > Conversational AI that knows your training history. The retention feature. Target: 3-4 days.
 
-- [ ] `POST /api/ai/coach` endpoint — accepts chat history + injects last 90 days workout context
-- [ ] Post-workout debrief becomes a **chat thread** (not a static read-only summary)
-- [ ] User can follow up: "What should I focus on next week?" "Was this session good?"
-- [ ] Standalone **Coach tab** in bottom navigation
-- [ ] Chat UI with message bubbles, typing indicator, markdown rendering for lists/bold
-- [ ] Context injection: full history + session + PRs + volume trends per muscle group
+**Backend (`server.ts`) — to build:**
+- [ ] `POST /api/ai/coach` endpoint
+  - Accepts: `{ message, chatHistory, workoutId? }`
+  - Injects last 90 days of workouts + exercises as context into Gemini prompt
+  - Injects current session PRs + volume summary if `workoutId` provided
+  - Returns: `{ reply }` — streaming optional later
+  - System prompt: LOFTE Coach persona with full history awareness
+
+**App — to build:**
+- [ ] Post-workout debrief becomes a **chat thread** (not static read-only text)
+- [ ] "Continue conversation →" on review screen opens the coach chat with debrief as first message
+- [ ] Standalone Coach screen accessible via floating AI button in tab bar
+- [ ] Chat UI: message bubbles, typing indicator (3-dot pulse), spring-in animations
+- [ ] Context strip at top: shows Coach's data awareness (streak, last PR, sessions this week)
+- [ ] Input bar: text + voice questions (mic icon)
 
 ---
 

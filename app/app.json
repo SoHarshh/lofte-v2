@@ -17,7 +17,8 @@
       "infoPlist": {
         "NSMicrophoneUsageDescription": "LOFTE uses the microphone to log workouts by voice.",
         "NSCameraUsageDescription": "LOFTE uses the camera to scan gym machine displays.",
-        "NSPhotoLibraryUsageDescription": "LOFTE can read photos to log workout data from machine displays."
+        "NSPhotoLibraryUsageDescription": "LOFTE can read photos to log workout data from machine displays.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "web": {
@@ -29,8 +30,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "3f828272-392d-4fe7-832b-5a6108c8032b"
       }
-    }
+    },
+    "owner": "soharshh"
   }
 }
