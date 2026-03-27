@@ -2,102 +2,137 @@
 
 Voice-first workout tracking for athletes who refuse to break their flow state. Speak your set, AI logs it instantly.
 
-## What's Working
+Available on **iOS via TestFlight**.
+
+---
+
+## Features
 
 | Feature | Status |
 |---------|--------|
+| Voice input → AI transcribe + parse → save | ✅ |
 | Text input → AI parse → save | ✅ |
-| Voice recording → AI transcribe + parse → save | ✅ |
-| Camera capture → AI Vision analyze → save | ✅ |
-| Workout history (persists across restarts) | ✅ |
-| Dashboard — volume trend + muscle group charts | ✅ |
-| Delete workouts | ✅ |
+| Camera / photo → AI Vision analyze → save | ✅ |
+| PR detection (auto-flags personal bests on save) | ✅ |
+| Progressive overload hints (shows last session's numbers) | ✅ |
+| Post-workout AI debrief | ✅ |
+| Workout history with delete | ✅ |
+| Dashboard — volume trends + muscle group breakdown | ✅ |
+| Cardio logging (distance, duration, pace) | ✅ |
+| LOFTE Coach (AI coaching tab) | Coming soon |
+
+---
 
 ## Tech Stack
 
-- **Frontend:** React 19 + TypeScript + Tailwind CSS + Vite
-- **Backend:** Express + TypeScript (TSX)
-- **Database:** SQLite (better-sqlite3)
-- **AI:** Google Gemini 2.5 Flash (audio + vision in one call)
+**Mobile App**
+- React Native + Expo SDK 55
+- TypeScript
+- expo-blur (frosted glass UI)
+- expo-audio (voice recording)
+- expo-image-picker (camera / library)
+- React Navigation (bottom tabs)
+
+**Backend**
+- Express + TypeScript (tsx)
+- Google Gemini 2.5 Flash (audio + vision + text parsing)
+- Supabase (Postgres database)
+- Deployed on Railway
+
+---
+
+## Architecture
+
+```
+lofte-v2/
+├── app/                        — React Native / Expo app
+│   ├── src/
+│   │   ├── screens/
+│   │   │   ├── SessionScreen.tsx   — Active workout session
+│   │   │   ├── DashboardScreen.tsx — Analytics + charts
+│   │   │   ├── HistoryScreen.tsx   — Past workouts
+│   │   │   ├── ProfileScreen.tsx   — Stats + settings
+│   │   │   └── CoachScreen.tsx     — AI Coach (coming soon)
+│   │   ├── components/
+│   │   │   ├── AppBackground.tsx   — Global background image
+│   │   │   └── GlassCard.tsx       — Frosted glass card component
+│   │   ├── types/index.ts          — TypeScript interfaces
+│   │   └── config.ts               — API base URL
+│   ├── assets/                 — Icons, splash, background
+│   ├── app.json                — Expo config
+│   └── eas.json                — EAS Build config
+├── server.ts                   — Express API server
+├── .env                        — API keys (not committed)
+└── package.json
+```
+
+---
 
 ## Running Locally
 
-**Prerequisites:** Node.js 18+
+**Prerequisites:** Node.js 18+, Expo CLI
 
-**1. Clone and install**
+### Backend
+
 ```bash
-git clone https://github.com/aeroanish1/Frictionless-Workout-Tracker-SportsTech-MVP.git
-cd Frictionless-Workout-Tracker-SportsTech-MVP
+# Install dependencies
 npm install
-```
 
-**2. Add your Gemini API key**
+# Create .env
+cp .env.example .env
+# Fill in GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
 
-Create a `.env` file in the root:
-```
-GEMINI_API_KEY=your_key_here
-```
-
-Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-
-> Note: The free tier gives 1500 requests/day. If you get a 429 error, generate a fresh key — new keys come with a full quota.
-
-**3. Start the dev server**
-```bash
+# Start server
 npm run dev
+# Runs on http://localhost:3000
 ```
 
-App runs at **http://localhost:3000**
+### Mobile App
 
-## How to Use
+```bash
+cd app
+npm install
+npx expo start
+```
 
-**Logging a workout:**
-1. Go to the **Log** tab
-2. Hit **Start Session**
-3. Choose your input method:
-   - **Voice** — tap the mic, speak naturally: *"bench press 3 sets of 10 at 80kg"*
-   - **Text** — type it out in the same natural format
-   - **Vision** — open camera, point at a gym machine summary screen, capture
-4. Review the parsed exercises added to your session
-5. Hit **Finish** to save
+Scan the QR code with Expo Go, or run on a simulator.
 
-**Viewing history:**
-- **History** tab shows all past workouts with exercise details
-- Hover over a workout to reveal the delete button
+> For voice recording to work, a physical device is required.
 
-**Analytics:**
-- **Dashboard** tab shows volume trend (last 7 workouts) and muscle group distribution
+---
 
-## Project Structure
+## Environment Variables
 
 ```
-src/
-  App.tsx                  — Main shell, session state, tab routing
-  components/
-    VoiceRecorder.tsx      — Voice + text input → Gemini AI
-    VisionLogger.tsx       — Camera/image → Gemini Vision
-    Dashboard.tsx          — Analytics charts
-    WorkoutList.tsx        — History list
-    Modal.tsx              — Confirm/error dialogs
-  types.ts                 — TypeScript interfaces
-server.ts                  — Express API + SQLite
-PLAN.md                    — Full build roadmap
+GEMINI_API_KEY=        # Google AI Studio — aistudio.google.com/apikey
+SUPABASE_URL=          # Your Supabase project URL
+SUPABASE_SERVICE_KEY=  # Supabase service role key (secret)
 ```
+
+The server falls back to SQLite if Supabase credentials are not set.
+
+---
 
 ## API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/workouts` | Fetch all workouts with exercises |
-| POST | `/api/workouts` | Save a new workout |
+| GET | `/health` | Health check |
+| POST | `/api/ai/parse-workout` | Parse text or audio into exercises |
+| POST | `/api/ai/parse-image` | Parse gym machine photo into exercises |
+| GET | `/api/workouts` | Fetch all workouts |
+| POST | `/api/workouts` | Save a workout, returns PR detections |
 | DELETE | `/api/workouts/:id` | Delete a workout |
+| GET | `/api/exercises/last` | Last logged performance for an exercise |
+| GET | `/api/exercises/history` | Full history for an exercise |
+| POST | `/api/workouts/:id/summary` | Generate AI post-workout debrief |
 
-## Roadmap
+---
 
-See [PLAN.md](./PLAN.md) for the full phased build plan.
+## Deployment
 
-**Up next:**
-- PR detection (auto-flag personal bests on save)
-- Progressive overload context (show last session's numbers while logging)
-- Post-workout AI summary
-- Per-exercise history drill-down
+**Backend** — Railway
+Auto-deploys from `main` branch. Uses `npm start` → `tsx server.ts`.
+
+**Mobile** — TestFlight (iOS)
+Built with EAS Build (`eas build --platform ios --profile production`), submitted via `eas submit`.
