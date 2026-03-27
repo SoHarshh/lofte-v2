@@ -172,6 +172,9 @@ async function startServer() {
   const PORT = 3000;
   app.use(express.json({ limit: "20mb" }));
 
+  // Health check
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
   // AI Routes
   app.post("/api/ai/parse-workout", async (req, res) => {
     const { text, audioBase64, mimeType } = req.body;
@@ -391,7 +394,8 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
     app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
   }
 
-  app.listen(PORT, "0.0.0.0", () => console.log(`Server running on http://localhost:${PORT}`));
+  const listenPort = Number(process.env.PORT) || PORT;
+  app.listen(listenPort, "0.0.0.0", () => console.log(`Server running on http://localhost:${listenPort}`));
 }
 
 startServer();

@@ -67,8 +67,8 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
       setIsRecording(true);
-    } catch {
-      Alert.alert('Voice unavailable', 'Voice recording requires a real device. Use text input in the simulator.');
+    } catch (err: any) {
+      Alert.alert('Voice unavailable', 'Could not start recording. Check microphone permissions in iOS Settings > LOFTE.');
     }
   };
 
