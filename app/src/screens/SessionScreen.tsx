@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, ActivityIndicator, Pressable,
   ActionSheetIOS, Platform, Modal, KeyboardAvoidingView,
-  Dimensions,
+  Dimensions, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -62,13 +62,23 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   // --- Voice PTT ---
   const startRecording = async () => {
     try {
-      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
-      if (!granted) { Alert.alert('Microphone permission required'); return; }
+      const { granted, canAskAgain } = await AudioModule.requestRecordingPermissionsAsync();
+      if (!granted) {
+        Alert.alert(
+          'Microphone Access Required',
+          'LOFTE needs microphone access to log workouts by voice. Enable it in Settings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() },
+          ]
+        );
+        return;
+      }
       await audioRecorder.prepareToRecordAsync();
-      audioRecorder.record();
+      await audioRecorder.record();
       setIsRecording(true);
     } catch (err: any) {
-      Alert.alert('Voice unavailable', 'Could not start recording. Check microphone permissions in iOS Settings > LOFTE.');
+      Alert.alert('Voice unavailable', err?.message ?? 'Could not start recording. Try again.');
     }
   };
 
