@@ -31,6 +31,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [manualExercise, setManualExercise] = useState('');
   const [manualWeight, setManualWeight] = useState(0);
   const [manualReps, setManualReps] = useState(0);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [showReview, setShowReview] = useState(false);
   const [prs, setPRs] = useState<any[]>([]);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
@@ -126,9 +127,39 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       reps: manualReps || 0,
       weight: manualWeight || 0,
     };
-    addToTranscript('text', `${exercise.name}`, [exercise]);
-    // Keep name + weight, reset reps for quick multi-set logging
+
+    if (editingEntryId) {
+      // Update existing entry
+      const updated = session.transcript.map(e =>
+        e.id === editingEntryId ? { ...e, exercises: [exercise] } : e
+      );
+      const updatedExercises = updated.flatMap(e => e.exercises ?? []);
+      onUpdate({ transcript: updated, exercises: updatedExercises });
+      setEditingEntryId(null);
+      setShowManualEntry(false);
+    } else {
+      addToTranscript('text', exercise.name, [exercise]);
+      setManualReps(0);
+    }
+  };
+
+  const startEditEntry = (entryId: string) => {
+    const entry = session.transcript.find(e => e.id === entryId);
+    if (!entry?.exercises?.[0]) return;
+    const ex = entry.exercises[0];
+    setManualExercise(ex.name);
+    setManualWeight(ex.weight ?? 0);
+    setManualReps(ex.reps ?? 0);
+    setEditingEntryId(entryId);
+    setShowManualEntry(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingEntryId(null);
+    setManualExercise('');
+    setManualWeight(0);
     setManualReps(0);
+    setShowManualEntry(false);
   };
 
   // --- Camera ---
@@ -443,6 +474,9 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                 <Text style={s.entryTime}>
                   {new Date(entry.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                 </Text>
+                <TouchableOpacity onPress={() => startEditEntry(entry.id)} style={{ paddingLeft: 8 }}>
+                  <Ionicons name="pencil-outline" size={15} color="rgba(255,255,255,0.35)" />
+                </TouchableOpacity>
                 <TouchableOpacity onPress={() => removeEntry(entry.id)} style={{ paddingLeft: 8 }}>
                   <Ionicons name="close" size={16} color="rgba(255,255,255,0.30)" />
                 </TouchableOpacity>
@@ -532,14 +566,19 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
               </View>
             </View>
 
-            {/* Log Set button */}
+            {/* Log Set / Update button */}
             <TouchableOpacity
               style={[s.logSetBtn, !manualExercise.trim() && { opacity: 0.4 }]}
               onPress={logManualSet}
               activeOpacity={0.85}
             >
-              <Text style={s.logSetBtnText}>Log Set</Text>
+              <Text style={s.logSetBtnText}>{editingEntryId ? 'Update Set' : 'Log Set'}</Text>
             </TouchableOpacity>
+            {editingEntryId && (
+              <TouchableOpacity onPress={cancelEdit} style={s.cancelEditBtn}>
+                <Text style={s.cancelEditText}>Cancel</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -818,6 +857,8 @@ const s = StyleSheet.create({
     paddingVertical: 14, alignItems: 'center', zIndex: 1,
   },
   logSetBtnText: { fontSize: 16, fontWeight: '700', color: '#050B14' },
+  cancelEditBtn: { paddingVertical: 10, alignItems: 'center', zIndex: 1 },
+  cancelEditText: { fontSize: 14, color: 'rgba(255,255,255,0.38)', fontWeight: '500' },
 
   // Action cluster
   actionCluster: {
