@@ -25,6 +25,10 @@ export interface TranscriptEntry {
   method: 'voice' | 'text' | 'camera';
   raw: string;
   exercises?: Exercise[];
+  pending?: boolean;
+  rawAudio?: string;
+  rawImage?: string;
+  mimeType?: string;
 }
 
 export interface SessionState {

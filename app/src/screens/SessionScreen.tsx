@@ -88,29 +88,29 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const stopRecordingAndSubmit = async () => {
     if (!isRecording) return;
     setIsRecording(false);
-    setIsProcessing(true);
     try {
       await audioRecorder.stop();
       const uri = audioRecorder.uri;
-      if (!uri) throw new Error('No audio recorded');
+      if (!uri) return;
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      const res = await fetch(`${API_BASE}/api/ai/parse-workout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/m4a' }),
-      });
-      const data = await res.json();
-      if (data.exercises?.length > 0) {
-        await addToTranscript('voice', 'Voice log', data.exercises, data.notes);
-      } else {
-        Alert.alert('Nothing recognised', 'Try again or use text input instead.');
-      }
+      // Log instantly as pending — will be processed when Finish is tapped
+      const entry: TranscriptEntry = {
+        id: Date.now().toString(),
+        timestamp: Date.now(),
+        method: 'voice',
+        raw: 'Voice log',
+        pending: true,
+        rawAudio: base64,
+        mimeType: 'audio/m4a',
+        exercises: [],
+      };
+      if (!session.isActive) onStart();
+      onUpdate({ transcript: [...session.transcript, entry] });
+      setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
     } catch {
-      Alert.alert('Failed to process voice log');
-    } finally {
-      setIsProcessing(false);
+      Alert.alert('Failed to save voice log');
     }
   };
 
@@ -185,24 +185,19 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       });
     }
     if (result.canceled || !result.assets?.[0]?.base64) return;
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/parse-image`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: result.assets[0].base64 }),
-      });
-      const data = await res.json();
-      if (data.exercises?.length > 0) {
-        await addToTranscript('camera', 'Photo logged', data.exercises, data.notes);
-      } else {
-        Alert.alert('No workout data found in photo');
-      }
-    } catch {
-      Alert.alert('Failed to process photo');
-    } finally {
-      setIsProcessing(false);
-    }
+    // Log instantly as pending — will be processed when Finish is tapped
+    const entry: TranscriptEntry = {
+      id: Date.now().toString(),
+      timestamp: Date.now(),
+      method: 'camera',
+      raw: 'Photo captured',
+      pending: true,
+      rawImage: result.assets[0].base64,
+      exercises: [],
+    };
+    if (!session.isActive) onStart();
+    onUpdate({ transcript: [...session.transcript, entry] });
+    setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   // --- Add to transcript (auto-starts session) ---
@@ -258,7 +253,10 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   // --- Finish ---
   const handleFinish = async () => {
-    if (session.exercises.length === 0) {
+    const hasPending = session.transcript.some(e => e.pending);
+    const hasResolved = session.exercises.length > 0;
+
+    if (!hasPending && !hasResolved) {
       Alert.alert(
         'Discard session?',
         'No exercises logged.',
@@ -271,13 +269,37 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     }
     setIsProcessing(true);
     try {
+      // Process all pending voice/camera entries
+      let allExercises = [...session.exercises];
+      for (const entry of session.transcript.filter(e => e.pending)) {
+        try {
+          const body = entry.rawAudio
+            ? { audioBase64: entry.rawAudio, mimeType: entry.mimeType || 'audio/m4a' }
+            : { imageBase64: entry.rawImage };
+          const endpoint = entry.rawAudio ? '/api/ai/parse-workout' : '/api/ai/parse-image';
+          const r = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await r.json();
+          if (data.exercises?.length > 0) allExercises = [...allExercises, ...data.exercises];
+        } catch { /* skip failed entries */ }
+      }
+
+      if (allExercises.length === 0) {
+        Alert.alert('Nothing to save', 'No exercises were recognised. Try again.');
+        setIsProcessing(false);
+        return;
+      }
+
       const res = await fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: session.startTime || new Date().toISOString(),
           notes: session.notes,
-          exercises: session.exercises,
+          exercises: allExercises,
         }),
       });
       const result = await res.json();
@@ -406,7 +428,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
           {/* Right: Finish (when exercises logged) */}
           <View style={{ width: 80, alignItems: 'flex-end' }}>
-            {session.exercises.length > 0 && (
+            {(session.exercises.length > 0 || session.transcript.some(e => e.pending)) && (
               <TouchableOpacity style={s.finishPill} onPress={handleFinish} activeOpacity={0.8}>
                 <Text style={s.finishPillText}>Finish</Text>
               </TouchableOpacity>
@@ -464,12 +486,18 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                   <Ionicons name={methodIcon(entry.method)} size={15} color="rgba(255,255,255,0.70)" />
                 </View>
                 <View style={s.entryBody}>
-                  {entry.exercises?.map((ex, i) => (
-                    <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
-                      <Text style={s.entryName}>{ex.name}</Text>
-                      <Text style={s.entryStats}>{formatExStats(ex)}</Text>
-                    </View>
-                  ))}
+                  {entry.pending ? (
+                    <Text style={s.entryPending}>
+                      {entry.method === 'voice' ? 'Voice log — processes on finish' : 'Photo — processes on finish'}
+                    </Text>
+                  ) : (
+                    entry.exercises?.map((ex, i) => (
+                      <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
+                        <Text style={s.entryName}>{ex.name}</Text>
+                        <Text style={s.entryStats}>{formatExStats(ex)}</Text>
+                      </View>
+                    ))
+                  )}
                 </View>
                 <Text style={s.entryTime}>
                   {new Date(entry.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
@@ -805,6 +833,7 @@ const s = StyleSheet.create({
   entryBody: { flex: 1, zIndex: 1 },
   entryName: { fontSize: 14, fontWeight: '600', color: '#fff' },
   entryStats: { fontSize: 13, color: 'rgba(255,255,255,0.60)', marginTop: 2 },
+  entryPending: { fontSize: 13, color: 'rgba(255,255,255,0.40)', fontStyle: 'italic' },
   entryTime: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 2, zIndex: 1 },
 
   // Manual entry panel
