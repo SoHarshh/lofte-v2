@@ -27,8 +27,10 @@ interface Props {
 
 export default function SessionScreen({ session, onStart, onEnd, onUpdate, colors }: Props) {
   const [isProcessing, setIsProcessing] = useState(false);
-  const [textInput, setTextInput] = useState('');
-  const [showTextInput, setShowTextInput] = useState(false);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualExercise, setManualExercise] = useState('');
+  const [manualWeight, setManualWeight] = useState(0);
+  const [manualReps, setManualReps] = useState(0);
   const [showReview, setShowReview] = useState(false);
   const [prs, setPRs] = useState<any[]>([]);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
@@ -111,30 +113,22 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     }
   };
 
-  // --- Text submit ---
-  const submitText = async () => {
-    if (!textInput.trim()) return;
-    const text = textInput.trim();
-    setTextInput('');
-    setShowTextInput(false);
-    setIsProcessing(true);
-    try {
-      const res = await fetch(`${API_BASE}/api/ai/parse-workout`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      if (data.exercises?.length > 0) {
-        await addToTranscript('text', text, data.exercises, data.notes);
-      } else {
-        Alert.alert('Nothing recognised', 'Try describing the exercise differently.');
-      }
-    } catch {
-      Alert.alert('Failed to reach backend');
-    } finally {
-      setIsProcessing(false);
+  // --- Manual entry (structured form) ---
+  const logManualSet = () => {
+    if (!manualExercise.trim()) {
+      Alert.alert('Enter an exercise name');
+      return;
     }
+    const exercise: Exercise = {
+      name: manualExercise.trim(),
+      muscleGroup: '',
+      sets: 1,
+      reps: manualReps || 0,
+      weight: manualWeight || 0,
+    };
+    addToTranscript('text', `${exercise.name}`, [exercise]);
+    // Keep name + weight, reset reps for quick multi-set logging
+    setManualReps(0);
   };
 
   // --- Camera ---
@@ -299,7 +293,10 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       if (ex.pace) parts.push(ex.pace);
       return parts.join(' · ') || '—';
     }
-    if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+    if (hasSetsReps) {
+      const setsStr = (ex.sets ?? 1) > 1 ? `${ex.sets}×` : '';
+      return `${setsStr}${ex.reps} reps${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+    }
     if (hasWeight) return `${ex.weight} lbs`;
     return '—';
   };
@@ -454,29 +451,94 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           </ScrollView>
         )}
 
-        {/* Text input panel */}
-        {showTextInput && (
-          <View style={s.textPanel}>
-            <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={s.textPanelTint} />
-            <View style={s.panelHighlight} />
+        {/* Manual entry panel */}
+        {showManualEntry && (
+          <View style={s.manualPanel}>
+            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
+            <View style={s.manualPanelTint} />
+            <View style={s.manualPanelHighlight} />
+
+            {/* Exercise name */}
             <TextInput
-              style={s.textInputField}
-              placeholder='e.g. "bench 3×10 @ 185"'
+              style={s.exerciseNameInput}
+              placeholder="Exercise name..."
               placeholderTextColor="rgba(255,255,255,0.28)"
-              value={textInput}
-              onChangeText={setTextInput}
-              onSubmitEditing={submitText}
-              returnKeyType="send"
+              value={manualExercise}
+              onChangeText={setManualExercise}
               autoFocus
-              selectionColor="rgba(124,58,237,0.8)"
+              selectionColor="rgba(255,255,255,0.5)"
+              returnKeyType="next"
             />
+            <View style={s.manualDivider} />
+
+            {/* Weight + Reps */}
+            <View style={s.manualFieldsRow}>
+              {/* Weight */}
+              <View style={s.manualField}>
+                <Text style={s.manualFieldLabel}>WEIGHT</Text>
+                <View style={s.stepperBox}>
+                  <TouchableOpacity
+                    style={s.stepperBtn}
+                    onPress={() => setManualWeight(w => Math.max(0, w - 5))}
+                  >
+                    <Ionicons name="remove" size={16} color="rgba(255,255,255,0.6)" />
+                  </TouchableOpacity>
+                  <TextInput
+                    style={s.stepperValue}
+                    value={manualWeight === 0 ? '' : String(manualWeight)}
+                    onChangeText={v => setManualWeight(Number(v.replace(/[^0-9]/g, '')) || 0)}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor="rgba(255,255,255,0.35)"
+                    selectionColor="rgba(255,255,255,0.5)"
+                  />
+                  <TouchableOpacity
+                    style={s.stepperBtn}
+                    onPress={() => setManualWeight(w => w + 5)}
+                  >
+                    <Ionicons name="add" size={16} color="rgba(255,255,255,0.6)" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={s.manualFieldDivider} />
+
+              {/* Reps */}
+              <View style={s.manualField}>
+                <Text style={s.manualFieldLabel}>REPS</Text>
+                <View style={s.stepperBox}>
+                  <TouchableOpacity
+                    style={s.stepperBtn}
+                    onPress={() => setManualReps(r => Math.max(0, r - 1))}
+                  >
+                    <Ionicons name="remove" size={16} color="rgba(255,255,255,0.6)" />
+                  </TouchableOpacity>
+                  <TextInput
+                    style={s.stepperValue}
+                    value={manualReps === 0 ? '' : String(manualReps)}
+                    onChangeText={v => setManualReps(Number(v.replace(/[^0-9]/g, '')) || 0)}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor="rgba(255,255,255,0.35)"
+                    selectionColor="rgba(255,255,255,0.5)"
+                  />
+                  <TouchableOpacity
+                    style={s.stepperBtn}
+                    onPress={() => setManualReps(r => r + 1)}
+                  >
+                    <Ionicons name="add" size={16} color="rgba(255,255,255,0.6)" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+
+            {/* Log Set button */}
             <TouchableOpacity
-              style={[s.sendBtn, !textInput.trim() && { opacity: 0.4 }]}
-              onPress={submitText}
-              disabled={!textInput.trim()}
+              style={[s.logSetBtn, !manualExercise.trim() && { opacity: 0.4 }]}
+              onPress={logManualSet}
+              activeOpacity={0.85}
             >
-              <Ionicons name="arrow-up" size={18} color="#050B14" />
+              <Text style={s.logSetBtnText}>Log Set</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -501,14 +563,14 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           </Pressable>
 
           <TouchableOpacity
-            style={[s.actionBtn, showTextInput && s.actionBtnSelected]}
-            onPress={() => setShowTextInput(!showTextInput)}
+            style={[s.actionBtn, showManualEntry && s.actionBtnSelected]}
+            onPress={() => setShowManualEntry(!showManualEntry)}
             activeOpacity={0.75}
           >
             <Ionicons
               name="pencil"
               size={20}
-              color={showTextInput ? '#050B14' : 'rgba(255,255,255,0.65)'}
+              color={showManualEntry ? '#050B14' : 'rgba(255,255,255,0.65)'}
             />
           </TouchableOpacity>
         </View>
@@ -706,30 +768,56 @@ const s = StyleSheet.create({
   entryStats: { fontSize: 13, color: 'rgba(255,255,255,0.60)', marginTop: 2 },
   entryTime: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 2, zIndex: 1 },
 
-  // Text input panel
-  textPanel: {
+  // Manual entry panel
+  manualPanel: {
     marginHorizontal: 16, marginBottom: 8,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 18, paddingHorizontal: 16, paddingVertical: 4,
-    flexDirection: 'row', alignItems: 'center', gap: 8, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 24, overflow: 'hidden',
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
   },
-  textPanelTint: {
+  manualPanelTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    backgroundColor: 'rgba(10,14,20,0.75)',
   },
-  panelHighlight: {
+  manualPanelHighlight: {
     position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.20)',
-    zIndex: 1,
+    backgroundColor: 'rgba(255,255,255,0.18)', zIndex: 1,
   },
-  textInputField: {
-    flex: 1, fontSize: 15, color: '#fff', paddingVertical: 12,
+  exerciseNameInput: {
+    fontSize: 22, fontWeight: '500', color: '#fff',
+    paddingBottom: 12, zIndex: 1,
   },
-  sendBtn: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: '#fff',
-    alignItems: 'center', justifyContent: 'center',
+  manualDivider: {
+    height: 1, backgroundColor: 'rgba(255,255,255,0.10)', marginBottom: 16,
   },
+  manualFieldsRow: {
+    flexDirection: 'row', alignItems: 'center', marginBottom: 16, zIndex: 1,
+  },
+  manualField: { flex: 1, alignItems: 'center' },
+  manualFieldLabel: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.40)',
+    letterSpacing: 1.5, marginBottom: 10,
+  },
+  manualFieldDivider: {
+    width: 1, height: 56, backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  stepperBox: {
+    flexDirection: 'row', alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  stepperBtn: {
+    width: 40, height: 48, alignItems: 'center', justifyContent: 'center',
+  },
+  stepperValue: {
+    flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '600',
+    color: '#fff', paddingVertical: 0,
+  },
+  logSetBtn: {
+    backgroundColor: '#fff', borderRadius: 16,
+    paddingVertical: 14, alignItems: 'center', zIndex: 1,
+  },
+  logSetBtnText: { fontSize: 16, fontWeight: '700', color: '#050B14' },
 
   // Action cluster
   actionCluster: {
