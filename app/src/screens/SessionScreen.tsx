@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ScrollView, Alert, ActivityIndicator, Pressable,
-  ActionSheetIOS, Platform, Modal, KeyboardAvoidingView,
+  Platform, Modal, KeyboardAvoidingView,
   Dimensions, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -138,19 +138,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   };
 
   // --- Camera ---
-  const takePhoto = () => {
-    if (Platform.OS === 'ios') {
-      ActionSheetIOS.showActionSheetWithOptions(
-        { options: ['Cancel', 'Take Photo', 'Choose from Library'], cancelButtonIndex: 0 },
-        (idx) => {
-          if (idx === 1) launchPhoto(true);
-          if (idx === 2) launchPhoto(false);
-        }
-      );
-    } else {
-      launchPhoto(false);
-    }
-  };
+  const takePhoto = () => launchPhoto(true);
 
   const launchPhoto = async (useCamera: boolean) => {
     let result: ImagePicker.ImagePickerResult;
