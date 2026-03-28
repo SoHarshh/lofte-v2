@@ -1,5 +1,4 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 import Database from "better-sqlite3";
 import dotenv from "dotenv";
@@ -384,15 +383,6 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       res.status(500).json({ error: error.message || "Failed to generate summary" });
     }
   });
-
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
-  }
 
   const listenPort = Number(process.env.PORT) || PORT;
   app.listen(listenPort, "0.0.0.0", () => console.log(`Server running on http://localhost:${listenPort}`));
