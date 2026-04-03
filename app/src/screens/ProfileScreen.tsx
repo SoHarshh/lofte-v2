@@ -10,6 +10,7 @@ import { useUser, useAuth } from '@clerk/expo';
 import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
+import { useAuthFetch } from '../hooks/useAuthFetch';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -52,17 +53,18 @@ export default function ProfileScreen({ colors }: Props) {
   const insets = useSafeAreaInsets();
   const { user } = useUser();
   const { signOut } = useAuth();
+  const authFetch = useAuthFetch();
 
   const displayName = user?.fullName || user?.firstName || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Athlete';
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
   const avatarUrl = user?.imageUrl;
 
   const load = useCallback(() => {
-    fetch(`${API_BASE}/api/workouts`)
+    authFetch(`${API_BASE}/api/workouts`)
       .then(r => r.json())
       .then(data => { setWorkouts(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [authFetch]);
 
   useFocusEffect(load);
 

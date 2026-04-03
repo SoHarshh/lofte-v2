@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
+import { verifyToken } from "@clerk/backend";
 
 dotenv.config();
 
@@ -50,11 +51,28 @@ function mapExercise(ex: any) {
   return { ...ex, muscleGroup: ex.muscle_group ?? ex.muscleGroup };
 }
 
+// ─── Auth middleware ───────────────────────────────────────────────────────────
+
+async function requireAuth(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const token = authHeader.slice(7);
+  try {
+    const payload = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY! });
+    req.userId = payload.sub;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
-async function dbGetWorkouts() {
+async function dbGetWorkouts(userId: string) {
   if (USE_SUPABASE && supabase) {
-    const { data: workouts, error: wErr } = await supabase.from("workouts").select("*").order("date", { ascending: false });
+    const { data: workouts, error: wErr } = await supabase.from("workouts").select("*").eq("user_id", userId).order("date", { ascending: false });
     if (wErr) throw wErr;
     const { data: exercises, error: eErr } = await supabase.from("exercises").select("*");
     if (eErr) throw eErr;
@@ -63,25 +81,29 @@ async function dbGetWorkouts() {
       exercises: (exercises || []).filter((e: any) => e.workout_id === w.id).map(mapExercise),
     }));
   }
-  const workouts = sqlite!.prepare("SELECT * FROM workouts ORDER BY date DESC").all();
-  const exercises = sqlite!.prepare("SELECT * FROM exercises").all();
+  const workouts = sqlite!.prepare("SELECT * FROM workouts WHERE user_id = ? ORDER BY date DESC").all(userId);
+  const ids = (workouts as any[]).map(w => w.id);
+  const exercises = ids.length > 0
+    ? sqlite!.prepare(`SELECT * FROM exercises WHERE workout_id IN (${ids.map(() => '?').join(','')})`).all(...ids)
+    : [];
   return workouts.map((w: any) => ({
     ...w,
     exercises: (exercises as any[]).filter(e => e.workout_id === w.id).map(mapExercise),
   }));
 }
 
-async function dbSaveWorkout(date: string, notes: string, exercises: any[]) {
+async function dbSaveWorkout(userId: string, date: string, notes: string, exercises: any[]) {
   if (USE_SUPABASE && supabase) {
-    // Snapshot prior bests
+    // Snapshot prior bests for this user only
     const priorBests: Record<string, number | null> = {};
     for (const ex of exercises.filter(e => e.weight)) {
       const key = ex.name.toLowerCase();
       if (key in priorBests) continue;
-      const { data } = await supabase.from("exercises").select("weight").ilike("name", key).order("weight", { ascending: false }).limit(1);
+      const { data } = await supabase.from("exercises").select("weight, workouts!inner(user_id)")
+        .ilike("name", key).eq("workouts.user_id", userId).order("weight", { ascending: false }).limit(1);
       priorBests[key] = data?.[0]?.weight ?? null;
     }
-    const { data: workout, error: wErr } = await supabase.from("workouts").insert({ date, notes: notes || "" }).select().single();
+    const { data: workout, error: wErr } = await supabase.from("workouts").insert({ date, notes: notes || "", user_id: userId }).select().single();
     if (wErr) throw wErr;
     if (exercises.length > 0) {
       const { error: eErr } = await supabase.from("exercises").insert(
@@ -98,21 +120,21 @@ async function dbSaveWorkout(date: string, notes: string, exercises: any[]) {
   }
 
   // SQLite
-  const getBest = sqlite!.prepare("SELECT MAX(weight) as maxWeight FROM exercises WHERE LOWER(name) = LOWER(?)");
+  const getBest = sqlite!.prepare("SELECT MAX(e.weight) as maxWeight FROM exercises e JOIN workouts w ON e.workout_id = w.id WHERE LOWER(e.name) = LOWER(?) AND w.user_id = ?");
   const priorBests: Record<string, number | null> = {};
   for (const ex of exercises.filter(e => e.weight)) {
     const key = ex.name.toLowerCase();
     if (key in priorBests) continue;
-    const row = getBest.get(ex.name) as any;
+    const row = getBest.get(ex.name, userId) as any;
     priorBests[key] = row?.maxWeight ?? null;
   }
-  const insertWorkout = sqlite!.prepare("INSERT INTO workouts (date, notes) VALUES (?, ?)");
+  const insertWorkout = sqlite!.prepare("INSERT INTO workouts (date, notes, user_id) VALUES (?, ?, ?)");
   const insertEx = sqlite!.prepare(
     "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   let workoutId: any;
   sqlite!.transaction(() => {
-    const info = insertWorkout.run(date, notes || "");
+    const info = insertWorkout.run(date, notes || "", userId);
     workoutId = info.lastInsertRowid;
     for (const ex of exercises) {
       insertEx.run(workoutId, ex.name, ex.muscleGroup || null, ex.sets ?? null, ex.reps ?? null,
@@ -122,20 +144,20 @@ async function dbSaveWorkout(date: string, notes: string, exercises: any[]) {
   return { workoutId, priorBests };
 }
 
-async function dbDeleteWorkout(id: string) {
+async function dbDeleteWorkout(id: string, userId: string) {
   if (USE_SUPABASE && supabase) {
-    const { error } = await supabase.from("workouts").delete().eq("id", id);
+    const { error } = await supabase.from("workouts").delete().eq("id", id).eq("user_id", userId);
     if (error) throw error;
     return;
   }
-  sqlite!.prepare("DELETE FROM workouts WHERE id = ?").run(id);
+  sqlite!.prepare("DELETE FROM workouts WHERE id = ? AND user_id = ?").run(id, userId);
 }
 
-async function dbGetLastExercise(name: string) {
+async function dbGetLastExercise(name: string, userId: string) {
   if (USE_SUPABASE && supabase) {
     const { data } = await supabase.from("exercises")
-      .select("sets, reps, weight, distance, duration, calories, workouts(date)")
-      .ilike("name", name).order("workout_id", { ascending: false }).limit(1);
+      .select("sets, reps, weight, distance, duration, calories, workouts!inner(date, user_id)")
+      .ilike("name", name).eq("workouts.user_id", userId).order("workout_id", { ascending: false }).limit(1);
     if (!data?.[0]) return null;
     const r = data[0] as any;
     return { sets: r.sets, reps: r.reps, weight: r.weight, distance: r.distance, duration: r.duration, calories: r.calories, date: r.workouts?.date };
@@ -143,8 +165,8 @@ async function dbGetLastExercise(name: string) {
   const row = sqlite!.prepare(`
     SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
     FROM exercises e JOIN workouts w ON e.workout_id = w.id
-    WHERE LOWER(e.name) = LOWER(?) ORDER BY w.date DESC LIMIT 1
-  `).get(name) as any;
+    WHERE LOWER(e.name) = LOWER(?) AND w.user_id = ? ORDER BY w.date DESC LIMIT 1
+  `).get(name, userId) as any;
   return row || null;
 }
 
@@ -281,19 +303,19 @@ Always normalize exercise names to proper case. Return empty exercises array onl
   });
 
   // Workout routes
-  app.get("/api/workouts", async (req, res) => {
+  app.get("/api/workouts", requireAuth, async (req: any, res) => {
     try {
-      res.json(await dbGetWorkouts());
+      res.json(await dbGetWorkouts(req.userId));
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch workouts" });
     }
   });
 
-  app.post("/api/workouts", async (req, res) => {
+  app.post("/api/workouts", requireAuth, async (req: any, res) => {
     const { date, notes, exercises } = req.body;
     try {
-      const { workoutId, priorBests } = await dbSaveWorkout(date, notes, exercises);
+      const { workoutId, priorBests } = await dbSaveWorkout(req.userId, date, notes, exercises);
       const prMap: Record<string, any> = {};
       for (const ex of exercises) {
         if (!ex.weight) continue;
@@ -312,9 +334,9 @@ Always normalize exercise names to proper case. Return empty exercises array onl
     }
   });
 
-  app.delete("/api/workouts/:id", async (req, res) => {
+  app.delete("/api/workouts/:id", requireAuth, async (req: any, res) => {
     try {
-      await dbDeleteWorkout(req.params.id);
+      await dbDeleteWorkout(req.params.id, req.userId);
       res.json({ success: true });
     } catch (error: any) {
       console.error(error);
@@ -322,31 +344,31 @@ Always normalize exercise names to proper case. Return empty exercises array onl
     }
   });
 
-  app.get("/api/exercises/last", async (req, res) => {
+  app.get("/api/exercises/last", requireAuth, async (req: any, res) => {
     const { name } = req.query as { name: string };
     if (!name) return res.status(400).json({ error: "name is required" });
     try {
-      res.json(await dbGetLastExercise(name));
+      res.json(await dbGetLastExercise(name, req.userId));
     } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch last performance" });
     }
   });
 
-  app.get("/api/exercises/history", async (req, res) => {
+  app.get("/api/exercises/history", requireAuth, async (req: any, res) => {
     const { name } = req.query as { name: string };
     if (!name) return res.status(400).json({ error: "name is required" });
     try {
       if (USE_SUPABASE && supabase) {
         const { data } = await supabase.from("exercises")
-          .select("sets, reps, weight, distance, duration, calories, workouts(date)")
-          .ilike("name", name).order("workout_id", { ascending: true });
+          .select("sets, reps, weight, distance, duration, calories, workouts!inner(date, user_id)")
+          .ilike("name", name).eq("workouts.user_id", req.userId).order("workout_id", { ascending: true });
         res.json((data || []).map((r: any) => ({ ...r, date: r.workouts?.date })));
       } else {
         const rows = sqlite!.prepare(`
           SELECT e.sets, e.reps, e.weight, e.distance, e.duration, e.calories, w.date
           FROM exercises e JOIN workouts w ON e.workout_id = w.id
-          WHERE LOWER(e.name) = LOWER(?) ORDER BY w.date ASC
-        `).all(name);
+          WHERE LOWER(e.name) = LOWER(?) AND w.user_id = ? ORDER BY w.date ASC
+        `).all(name, req.userId);
         res.json(rows);
       }
     } catch (error: any) {
@@ -354,7 +376,7 @@ Always normalize exercise names to proper case. Return empty exercises array onl
     }
   });
 
-  app.post("/api/workouts/:id/summary", async (req, res) => {
+  app.post("/api/workouts/:id/summary", requireAuth, async (req: any, res) => {
     const { prs = [] } = req.body;
     try {
       const workout = await dbGetWorkoutById(req.params.id);

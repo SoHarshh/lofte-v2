@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout, Exercise } from '../types/index';
+import { useAuthFetch } from '../hooks/useAuthFetch';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -57,13 +58,14 @@ export default function HistoryScreen({ colors }: Props) {
   const [activeFilter, setActiveFilter] = useState('All');
   const [expanded, setExpanded] = useState<number | null>(null);
   const insets = useSafeAreaInsets();
+  const authFetch = useAuthFetch();
 
   const load = useCallback(() => {
-    fetch(`${API_BASE}/api/workouts`)
+    authFetch(`${API_BASE}/api/workouts`)
       .then(r => r.json())
       .then(data => { setWorkouts(Array.isArray(data) ? data : []); setLoading(false); })
       .catch(() => setLoading(false));
-  }, []);
+  }, [authFetch]);
 
   useFocusEffect(load);
 
