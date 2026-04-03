@@ -84,7 +84,7 @@ async function dbGetWorkouts(userId: string) {
   const workouts = sqlite!.prepare("SELECT * FROM workouts WHERE user_id = ? ORDER BY date DESC").all(userId);
   const ids = (workouts as any[]).map(w => w.id);
   const exercises = ids.length > 0
-    ? sqlite!.prepare(`SELECT * FROM exercises WHERE workout_id IN (${ids.map(() => '?').join(','')})`).all(...ids)
+    ? sqlite!.prepare(`SELECT * FROM exercises WHERE workout_id IN (${ids.map(() => '?').join(',')})`).all(...ids)
     : [];
   return workouts.map((w: any) => ({
     ...w,
