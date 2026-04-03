@@ -1,11 +1,12 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Platform,
+  TouchableOpacity, ActivityIndicator, Platform, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { useUser, useAuth } from '@clerk/expo';
 import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
@@ -49,6 +50,12 @@ export default function ProfileScreen({ colors }: Props) {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const insets = useSafeAreaInsets();
+  const { user } = useUser();
+  const { signOut } = useAuth();
+
+  const displayName = user?.fullName || user?.firstName || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Athlete';
+  const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
+  const avatarUrl = user?.imageUrl;
 
   const load = useCallback(() => {
     fetch(`${API_BASE}/api/workouts`)
@@ -86,9 +93,12 @@ export default function ProfileScreen({ colors }: Props) {
         <View style={s.hero}>
           <View style={s.avatarWrap}>
             <View style={s.avatarHighlight} />
-            <Text style={[s.avatarInitials, { fontFamily: SERIF }]}>A</Text>
+            {avatarUrl
+              ? <Image source={{ uri: avatarUrl }} style={StyleSheet.absoluteFillObject} />
+              : <Text style={[s.avatarInitials, { fontFamily: SERIF }]}>{initials}</Text>
+            }
           </View>
-          <Text style={[s.name, { fontFamily: SERIF }]}>Athlete</Text>
+          <Text style={[s.name, { fontFamily: SERIF }]}>{displayName}</Text>
           <Text style={s.memberLabel}>LOFTE MEMBER</Text>
         </View>
 
@@ -117,6 +127,12 @@ export default function ProfileScreen({ colors }: Props) {
             </TouchableOpacity>
           ))}
         </GlassCard>
+
+        {/* Sign out */}
+        <TouchableOpacity style={s.signOutBtn} onPress={() => signOut()} activeOpacity={0.7}>
+          <Ionicons name="log-out-outline" size={16} color="rgba(255,255,255,0.45)" />
+          <Text style={s.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
 
         {/* App version */}
         <Text style={s.version}>LOFTE v1.0 · Built for athletes</Text>
@@ -191,9 +207,17 @@ const s = StyleSheet.create({
   },
   settingsLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.80)' },
 
+  signOutBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 14, marginTop: 20,
+    borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  signOutText: { fontSize: 14, color: 'rgba(255,255,255,0.45)', fontWeight: '500' },
+
   version: {
     textAlign: 'center', fontSize: 11,
-    color: 'rgba(255,255,255,0.20)', marginTop: 28,
+    color: 'rgba(255,255,255,0.20)', marginTop: 16,
     letterSpacing: 0.5,
   },
 });
