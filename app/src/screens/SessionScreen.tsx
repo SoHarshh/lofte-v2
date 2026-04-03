@@ -77,6 +77,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
         );
         return;
       }
+      await AudioModule.setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       await audioRecorder.prepareToRecordAsync();
       await audioRecorder.record();
       setIsRecording(true);
