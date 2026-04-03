@@ -2,6 +2,7 @@
   "expo": {
     "name": "LOFTE",
     "slug": "lofte",
+    "scheme": "lofte",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -26,7 +27,8 @@
     },
     "plugins": [
       "expo-audio",
-      "expo-image-picker"
+      "expo-image-picker",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

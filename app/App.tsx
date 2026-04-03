@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { View, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { ClerkProvider, useAuth } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
 import { SessionState } from './src/types/index';
 import { AppBackground } from './src/components/AppBackground';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -12,6 +14,9 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SessionScreen from './src/screens/SessionScreen';
 import CoachScreen from './src/screens/CoachScreen';
+import LoginScreen from './src/screens/LoginScreen';
+
+const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
 const Tab = createBottomTabNavigator();
 
@@ -91,8 +96,9 @@ function FloatingTabBar({ state, navigation }: any) {
   );
 }
 
-export default function App() {
+function MainApp() {
   const [session, setSession] = useState<SessionState>(initialSession);
+  const { isSignedIn, isLoaded } = useAuth();
 
   const startSession = () =>
     setSession({ isActive: true, startTime: new Date().toISOString(), transcript: [], exercises: [], notes: '' });
@@ -100,44 +106,63 @@ export default function App() {
   const updateSession = (updates: Partial<SessionState>) =>
     setSession(prev => ({ ...prev, ...updates }));
 
+  if (!isLoaded) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color="#fff" />
+      </View>
+    );
+  }
+
+  if (!isSignedIn) {
+    return <LoginScreen />;
+  }
+
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" />
-      <AppBackground>
-      <NavigationContainer>
-          <Tab.Navigator
-            tabBar={(props) => <FloatingTabBar {...props} />}
-            screenOptions={{ headerShown: false }}
-            sceneContainerStyle={{ backgroundColor: 'transparent' }}
-          >
-            <Tab.Screen name="Home">
-              {() => <DashboardScreen colors={COLORS} sessionActive={session.isActive} />}
-            </Tab.Screen>
-            <Tab.Screen name="History">
-              {() => <HistoryScreen colors={COLORS} />}
-            </Tab.Screen>
-            <Tab.Screen name="Profile">
-              {() => <ProfileScreen colors={COLORS} />}
-            </Tab.Screen>
-            {/* Hidden from tab bar — navigated to programmatically */}
-            <Tab.Screen name="Session">
-              {() => (
-                <SessionScreen
-                  session={session}
-                  onStart={startSession}
-                  onEnd={endSession}
-                  onUpdate={updateSession}
-                  colors={COLORS}
-                />
-              )}
-            </Tab.Screen>
-            <Tab.Screen name="Coach">
-              {() => <CoachScreen colors={COLORS} />}
-            </Tab.Screen>
-          </Tab.Navigator>
-        </NavigationContainer>
-      </AppBackground>
-    </SafeAreaProvider>
+    <NavigationContainer>
+      <Tab.Navigator
+        tabBar={(props) => <FloatingTabBar {...props} />}
+        screenOptions={{ headerShown: false }}
+        sceneContainerStyle={{ backgroundColor: 'transparent' }}
+      >
+        <Tab.Screen name="Home">
+          {() => <DashboardScreen colors={COLORS} sessionActive={session.isActive} />}
+        </Tab.Screen>
+        <Tab.Screen name="History">
+          {() => <HistoryScreen colors={COLORS} />}
+        </Tab.Screen>
+        <Tab.Screen name="Profile">
+          {() => <ProfileScreen colors={COLORS} />}
+        </Tab.Screen>
+        <Tab.Screen name="Session">
+          {() => (
+            <SessionScreen
+              session={session}
+              onStart={startSession}
+              onEnd={endSession}
+              onUpdate={updateSession}
+              colors={COLORS}
+            />
+          )}
+        </Tab.Screen>
+        <Tab.Screen name="Coach">
+          {() => <CoachScreen colors={COLORS} />}
+        </Tab.Screen>
+      </Tab.Navigator>
+    </NavigationContainer>
+  );
+}
+
+export default function App() {
+  return (
+    <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
+      <SafeAreaProvider>
+        <StatusBar style="light" />
+        <AppBackground>
+          <MainApp />
+        </AppBackground>
+      </SafeAreaProvider>
+    </ClerkProvider>
   );
 }
 
