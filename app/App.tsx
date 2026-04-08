@@ -16,7 +16,9 @@ import SessionScreen from './src/screens/SessionScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import LoginScreen from './src/screens/LoginScreen';
 
-const CLERK_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
+const CLERK_KEY =
+  process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+  'pk_test_c2V0dGxlZC1tb29zZS0yNC5jbGVyay5hY2NvdW50cy5kZXYk';
 
 const Tab = createBottomTabNavigator();
 

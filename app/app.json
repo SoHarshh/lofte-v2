@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.soharshh.lofte",
+      "bundleIdentifier": "com.nilsharsh.lofte",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "LOFTE uses the microphone to log workouts by voice.",
         "NSCameraUsageDescription": "LOFTE uses the camera to scan gym machine displays.",
@@ -35,6 +35,15 @@
         "projectId": "3f828272-392d-4fe7-832b-5a6108c8032b"
       }
     },
-    "owner": "soharshh"
+    "owner": "soharshh",
+    "android": {
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
+      "package": "com.nilsharsh.lofte"
+    }
   }
 }

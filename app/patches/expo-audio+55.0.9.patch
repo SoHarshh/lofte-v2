@@ -1,0 +1,17 @@
+diff --git a/node_modules/expo-audio/ios/AudioRecordingRequester.swift b/node_modules/expo-audio/ios/AudioRecordingRequester.swift
+index 08c8711..4bc039f 100644
+--- a/node_modules/expo-audio/ios/AudioRecordingRequester.swift
++++ b/node_modules/expo-audio/ios/AudioRecordingRequester.swift
+@@ -12,11 +12,7 @@ public class AudioRecordingRequester: NSObject, EXPermissionsRequester {
+     var status: EXPermissionStatus
+ 
+     guard (Bundle.main.infoDictionary?["NSMicrophoneUsageDescription"]) != nil else {
+-      RCTFatal(RCTErrorWithMessage("""
+-        This app is missing NSMicrophoneUsageDescription, so audio services will fail.
+-        Add one of these keys to your bundle's Info.plist.
+-      """))
+-      return ["status": EXPermissionStatusDenied]
++      fatalError("This app is missing NSMicrophoneUsageDescription, so audio services will fail. Add this key to your bundle's Info.plist.")
+     }
+ 
+     switch systemStatus {
