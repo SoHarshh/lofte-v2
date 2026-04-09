@@ -133,7 +133,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const processVoiceEntry = async (entryId: string, uri: string) => {
     try {
       const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: FileSystem.EncodingType.Base64,
+        encoding: 'base64' as any,
       });
       const token = await getToken();
       const r = await fetch(`${API_BASE}/api/ai/parse-workout`, {
