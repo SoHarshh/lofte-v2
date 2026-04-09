@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
+import OpenAI from "openai";
 import { verifyToken } from "@clerk/backend";
 
 dotenv.config();
@@ -218,10 +219,25 @@ For strength exercises:
 
 Always normalize exercise names to proper case. Return empty exercises array only if the input contains no exercise information.`;
 
+      let transcript: string | undefined;
+
       if (audioBase64) {
-        parts.push({ text: systemPrompt });
-        parts.push({ inlineData: { mimeType: mimeType || "audio/m4a", data: audioBase64 } });
+        // Transcribe with Whisper first, then extract with Gemini
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const audioBuffer = Buffer.from(audioBase64, "base64");
+        const audioFile = new File([audioBuffer], "recording.m4a", { type: mimeType || "audio/m4a" });
+        const whisperResult = await openai.audio.transcriptions.create({
+          file: audioFile,
+          model: "whisper-1",
+          language: "en",
+        });
+        transcript = whisperResult.text;
+        if (!transcript?.trim()) {
+          return res.json({ exercises: [], transcript: "" });
+        }
+        parts.push({ text: `${systemPrompt}\n\nInput: "${transcript}"` });
       } else if (text) {
+        transcript = text;
         parts.push({ text: `${systemPrompt}\n\nInput: "${text}"` });
       } else {
         return res.status(400).json({ error: "Provide either text or audioBase64" });
@@ -255,7 +271,8 @@ Always normalize exercise names to proper case. Return empty exercises array onl
           },
         },
       });
-      res.json(JSON.parse(response.text));
+      const parsed = JSON.parse(response.text);
+      res.json({ ...parsed, transcript });
     } catch (error: any) {
       console.error("AI parse-workout error:", error);
       res.status(500).json({ error: error.message || "AI processing failed" });
