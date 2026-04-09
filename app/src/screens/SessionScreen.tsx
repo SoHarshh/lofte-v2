@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '@clerk/expo';
 import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -39,9 +40,12 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [tick, setTick] = useState(0);
   const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
   const transcriptRef = useRef<ScrollView>(null);
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
 
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { getToken } = useAuth();
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
 
   // Timer
@@ -65,7 +69,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   // --- Voice PTT ---
   const startRecording = async () => {
     try {
-      const { granted, canAskAgain } = await AudioModule.requestRecordingPermissionsAsync();
+      const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
         Alert.alert(
           'Microphone Access Required',
@@ -88,30 +92,81 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   const stopRecordingAndSubmit = async () => {
     if (!isRecording) return;
-    setIsRecording(false);
+    setIsRecording(false); // reset UI immediately — no stuck state
+
+    let uri: string | null = null;
     try {
       await audioRecorder.stop();
-      const uri = audioRecorder.uri;
-      if (!uri) return;
+      uri = audioRecorder.uri;
+    } catch (err: any) {
+      Alert.alert('Recording failed', err?.message ?? 'Could not stop recording. Try again.');
+      return;
+    }
+
+    if (!uri) {
+      Alert.alert('Recording failed', 'No audio captured. Try again.');
+      return;
+    }
+
+    // Auto-start session on first log
+    if (!session.isActive) onStart();
+
+    // Add a "Parsing..." placeholder immediately so UI feels responsive
+    const entryId = Date.now().toString();
+    const placeholder: TranscriptEntry = {
+      id: entryId,
+      timestamp: Date.now(),
+      method: 'voice',
+      raw: 'Parsing...',
+      pending: true,
+      exercises: [],
+    };
+    onUpdate({ transcript: [...sessionRef.current.transcript, placeholder] });
+    setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // Process in background — user can keep recording
+    processVoiceEntry(entryId, uri);
+  };
+
+  const processVoiceEntry = async (entryId: string, uri: string) => {
+    try {
       const base64 = await FileSystem.readAsStringAsync(uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      // Log instantly as pending — will be processed when Finish is tapped
-      const entry: TranscriptEntry = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        method: 'voice',
-        raw: 'Voice log',
-        pending: true,
-        rawAudio: base64,
-        mimeType: 'audio/m4a',
-        exercises: [],
-      };
-      if (!session.isActive) onStart();
-      onUpdate({ transcript: [...session.transcript, entry] });
-      setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
-    } catch {
-      Alert.alert('Failed to save voice log');
+      const token = await getToken();
+      const r = await fetch(`${API_BASE}/api/ai/parse-workout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ audioBase64: base64, mimeType: 'audio/m4a' }),
+      });
+      const data = await r.json();
+
+      const current = sessionRef.current;
+      if (data.exercises?.length > 0) {
+        const resolved: TranscriptEntry = {
+          id: entryId,
+          timestamp: Date.now(),
+          method: 'voice',
+          raw: data.transcript || 'Voice log',
+          pending: false,
+          exercises: data.exercises,
+        };
+        onUpdate({
+          transcript: current.transcript.map(e => e.id === entryId ? resolved : e),
+          exercises: [...current.exercises, ...data.exercises],
+        });
+      } else {
+        // Nothing recognised — remove the placeholder
+        onUpdate({ transcript: current.transcript.filter(e => e.id !== entryId) });
+        Alert.alert('Nothing recognised', 'Try speaking more clearly, or use manual entry.');
+      }
+    } catch (err: any) {
+      const current = sessionRef.current;
+      onUpdate({ transcript: current.transcript.filter(e => e.id !== entryId) });
+      Alert.alert('Voice log failed', err?.message ?? 'Could not process recording. Try again.');
     }
   };
 
@@ -186,19 +241,59 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       });
     }
     if (result.canceled || !result.assets?.[0]?.base64) return;
-    // Log instantly as pending — will be processed when Finish is tapped
-    const entry: TranscriptEntry = {
-      id: Date.now().toString(),
+    if (!session.isActive) onStart();
+
+    const entryId = Date.now().toString();
+    const placeholder: TranscriptEntry = {
+      id: entryId,
       timestamp: Date.now(),
       method: 'camera',
-      raw: 'Photo captured',
+      raw: 'Parsing photo...',
       pending: true,
-      rawImage: result.assets[0].base64,
       exercises: [],
     };
-    if (!session.isActive) onStart();
-    onUpdate({ transcript: [...session.transcript, entry] });
+    onUpdate({ transcript: [...sessionRef.current.transcript, placeholder] });
     setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
+
+    processImageEntry(entryId, result.assets[0].base64!);
+  };
+
+  const processImageEntry = async (entryId: string, base64: string) => {
+    try {
+      const token = await getToken();
+      const r = await fetch(`${API_BASE}/api/ai/parse-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ imageBase64: base64 }),
+      });
+      const data = await r.json();
+      const current = sessionRef.current;
+
+      if (data.exercises?.length > 0) {
+        const resolved: TranscriptEntry = {
+          id: entryId,
+          timestamp: Date.now(),
+          method: 'camera',
+          raw: 'Photo log',
+          pending: false,
+          exercises: data.exercises,
+        };
+        onUpdate({
+          transcript: current.transcript.map(e => e.id === entryId ? resolved : e),
+          exercises: [...current.exercises, ...data.exercises],
+        });
+      } else {
+        onUpdate({ transcript: current.transcript.filter(e => e.id !== entryId) });
+        Alert.alert('Nothing recognised', 'Could not read exercises from the photo.');
+      }
+    } catch (err: any) {
+      const current = sessionRef.current;
+      onUpdate({ transcript: current.transcript.filter(e => e.id !== entryId) });
+      Alert.alert('Photo log failed', err?.message ?? 'Try again.');
+    }
   };
 
   // --- Add to transcript (auto-starts session) ---
@@ -254,10 +349,15 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   // --- Finish ---
   const handleFinish = async () => {
-    const hasPending = session.transcript.some(e => e.pending);
-    const hasResolved = session.exercises.length > 0;
+    const stillParsing = session.transcript.some(e => e.pending);
+    const hasExercises = session.exercises.length > 0;
 
-    if (!hasPending && !hasResolved) {
+    if (stillParsing) {
+      Alert.alert('Still processing', 'A voice or photo log is still being parsed. Wait a moment and try again.');
+      return;
+    }
+
+    if (!hasExercises) {
       Alert.alert(
         'Discard session?',
         'No exercises logged.',
@@ -268,61 +368,39 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       );
       return;
     }
+
     setIsProcessing(true);
     try {
-      // Process all pending voice/camera entries
-      let allExercises = [...session.exercises];
-      for (const entry of session.transcript.filter(e => e.pending)) {
-        try {
-          const body = entry.rawAudio
-            ? { audioBase64: entry.rawAudio, mimeType: entry.mimeType || 'audio/m4a' }
-            : { imageBase64: entry.rawImage };
-          const endpoint = entry.rawAudio ? '/api/ai/parse-workout' : '/api/ai/parse-image';
-          const r = await fetch(`${API_BASE}${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const data = await r.json();
-          if (data.exercises?.length > 0) allExercises = [...allExercises, ...data.exercises];
-        } catch { /* skip failed entries */ }
-      }
-
-      if (allExercises.length === 0) {
-        Alert.alert('Nothing to save', 'No exercises were recognised. Try again.');
-        setIsProcessing(false);
-        return;
-      }
+      const token = await getToken();
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
 
       const res = await fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           date: session.startTime || new Date().toISOString(),
           notes: session.notes,
-          exercises: allExercises,
+          exercises: session.exercises,
         }),
       });
       const result = await res.json();
       setPRs(result.prs || []);
 
-      // Get AI debrief
+      // AI debrief (non-critical)
       try {
-        const debriefRes = await fetch(
-          `${API_BASE}/api/workouts/${result.workoutId}/summary`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prs: result.prs || [] }),
-          }
-        );
+        const debriefRes = await fetch(`${API_BASE}/api/workouts/${result.workoutId}/summary`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ prs: result.prs || [] }),
+        });
         const debrief = await debriefRes.json();
         setAiDebrief(debrief.summary || null);
       } catch { /* non-critical */ }
 
       setShowReview(true);
-    } catch {
-      Alert.alert('Failed to save workout');
+    } catch (err: any) {
+      Alert.alert('Failed to save workout', err?.message ?? 'Try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -485,9 +563,10 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                 </View>
                 <View style={s.entryBody}>
                   {entry.pending ? (
-                    <Text style={s.entryPending}>
-                      {entry.method === 'voice' ? 'Voice log — processes on finish' : 'Photo — processes on finish'}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ActivityIndicator size="small" color="rgba(255,255,255,0.50)" />
+                      <Text style={s.entryPending}>{entry.raw}</Text>
+                    </View>
                   ) : (
                     entry.exercises?.map((ex, i) => (
                       <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
@@ -500,9 +579,11 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                 <Text style={s.entryTime}>
                   {new Date(entry.timestamp).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                 </Text>
-                <TouchableOpacity onPress={() => startEditEntry(entry.id)} style={{ paddingLeft: 8 }}>
-                  <Ionicons name="pencil-outline" size={15} color="rgba(255,255,255,0.35)" />
-                </TouchableOpacity>
+                {!entry.pending && (
+                  <TouchableOpacity onPress={() => startEditEntry(entry.id)} style={{ paddingLeft: 8 }}>
+                    <Ionicons name="pencil-outline" size={15} color="rgba(255,255,255,0.35)" />
+                  </TouchableOpacity>
+                )}
                 <TouchableOpacity onPress={() => removeEntry(entry.id)} style={{ paddingLeft: 8 }}>
                   <Ionicons name="close" size={16} color="rgba(255,255,255,0.30)" />
                 </TouchableOpacity>
