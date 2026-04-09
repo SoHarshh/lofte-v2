@@ -411,9 +411,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           <View style={s.headerCenter}>
             {/* Timer pill */}
             <View style={s.timerPill}>
-              <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={s.timerPillTint} />
-              <View style={s.pillHighlight} />
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
               <Text style={s.timerText}>
                 {session.isActive ? formatTimer(elapsed) : '—'}
               </Text>
@@ -481,8 +479,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           >
             {session.transcript.map(entry => (
               <View key={entry.id} style={s.entry}>
-                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-                <View style={s.entryTint} />
+                <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
                 <View style={s.entryIcon}>
                   <Ionicons name={methodIcon(entry.method)} size={15} color="rgba(255,255,255,0.70)" />
                 </View>
@@ -517,9 +514,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
         {/* Manual entry panel */}
         {showManualEntry && (
           <View style={s.manualPanel}>
-            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={s.manualPanelTint} />
-            <View style={s.manualPanelHighlight} />
+            <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
 
             {/* Exercise name */}
             <TextInput
@@ -647,8 +642,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       {/* Processing overlay */}
       {isProcessing && (
         <View style={s.overlay}>
-          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={s.overlayTint} />
+          <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
           <ActivityIndicator size="large" color="rgba(255,255,255,0.90)" />
           <Text style={s.overlayText}>Processing…</Text>
         </View>
@@ -658,11 +652,9 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       <Modal visible={showReview} transparent animationType="slide" onRequestClose={handleDone}>
         <View style={s.modalBg}>
           <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
-            <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={s.sheetTint} />
+            <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
             {/* Handle */}
             <View style={s.sheetHandle} />
-            <View style={s.sheetHighlight} />
 
             <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1, zIndex: 1 }} contentContainerStyle={{ paddingBottom: 16 }}>
               <Text style={s.reviewTitle}>Session Complete</Text>
@@ -702,7 +694,6 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
               {/* AI Debrief */}
               {aiDebrief && (
                 <View style={s.debriefCard}>
-                  <View style={s.sheetHighlight} />
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 10 }}>
                     <Text style={s.debriefLabel}>LOFTE COACH</Text>
                     <Ionicons name="flash" size={10} color="rgba(255,255,255,0.65)" />
@@ -746,15 +737,6 @@ const s = StyleSheet.create({
     borderRadius: 100,
     paddingHorizontal: 20, paddingVertical: 8,
     overflow: 'hidden',
-  },
-  timerPillTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-  },
-  pillHighlight: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.20)',
-    zIndex: 1,
   },
   timerText: {
     fontFamily: 'Courier', fontSize: 22, fontWeight: '500',
@@ -821,10 +803,6 @@ const s = StyleSheet.create({
     borderRadius: 16, padding: 14, marginBottom: 8, gap: 10,
     overflow: 'hidden',
   },
-  entryTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
   entryIcon: {
     width: 32, height: 32, borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -843,14 +821,6 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 24, overflow: 'hidden',
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
-  },
-  manualPanelTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(10,14,20,0.75)',
-  },
-  manualPanelHighlight: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.18)', zIndex: 1,
   },
   exerciseNameInput: {
     fontSize: 22, fontWeight: '500', color: '#fff',
@@ -917,10 +887,6 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', gap: 12,
     overflow: 'hidden',
   },
-  overlayTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(5,11,20,0.75)',
-  },
   overlayText: { color: 'rgba(255,255,255,0.80)', fontSize: 15, fontWeight: '500', zIndex: 1 },
 
   // Review Modal
@@ -934,20 +900,11 @@ const s = StyleSheet.create({
     padding: 24, maxHeight: '92%',
     overflow: 'hidden',
   },
-  sheetTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(5,11,20,0.85)',
-  },
   sheetHandle: {
     width: 40, height: 4, borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.20)',
     alignSelf: 'center', marginBottom: 20,
     zIndex: 1,
-  },
-  sheetHighlight: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    zIndex: 2,
   },
   reviewTitle: { fontSize: 28, fontWeight: '400', color: '#fff', fontFamily: 'Georgia', marginBottom: 4 },
   reviewSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 20 },

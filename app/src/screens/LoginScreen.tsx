@@ -129,9 +129,7 @@ export default function LoginScreen() {
             <Text style={s.subtitle}>We sent a 6-digit code to {email}</Text>
 
             <View style={s.card}>
-              <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={s.cardTint} />
-              <View style={s.cardHighlight} />
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
               <TextInput
                 style={s.input}
                 placeholder="Enter verification code"
@@ -188,8 +186,7 @@ export default function LoginScreen() {
               onPress={() => handleSSO('oauth_apple')}
               activeOpacity={0.8}
             >
-              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={s.oauthTint} />
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
               <Ionicons name="logo-apple" size={20} color="#fff" />
               <Text style={s.oauthBtnText}>Continue with Apple</Text>
             </TouchableOpacity>
@@ -199,8 +196,7 @@ export default function LoginScreen() {
               onPress={() => handleSSO('oauth_google')}
               activeOpacity={0.8}
             >
-              <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={s.oauthTint} />
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
               <Ionicons name="logo-google" size={18} color="#fff" />
               <Text style={s.oauthBtnText}>Continue with Google</Text>
             </TouchableOpacity>
@@ -216,9 +212,7 @@ export default function LoginScreen() {
           {/* First + Last name (sign up only) */}
           {!isSignIn && (
             <View style={[s.card, { marginBottom: 12 }]}>
-              <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-              <View style={s.cardTint} />
-              <View style={s.cardHighlight} />
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
               <View style={{ flexDirection: 'row' }}>
                 <TextInput
                   style={[s.input, { flex: 1 }]}
@@ -245,9 +239,7 @@ export default function LoginScreen() {
 
           {/* Email + password */}
           <View style={s.card}>
-            <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={s.cardTint} />
-            <View style={s.cardHighlight} />
+            <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
 
             <TextInput
               style={s.input}
@@ -335,10 +327,6 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
     overflow: 'hidden',
   },
-  oauthTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
   oauthBtnText: { fontSize: 15, fontWeight: '600', color: '#fff', zIndex: 1 },
 
   dividerRow: {
@@ -350,14 +338,6 @@ const s = StyleSheet.create({
   card: {
     borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     overflow: 'hidden', marginBottom: 16,
-  },
-  cardTint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  cardHighlight: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.18)',
   },
   input: {
     fontSize: 15, color: '#fff',
