@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useSSO, useSignIn, useSignUp } from '@clerk/expo';
+import { useSSO, useSignIn, useSignUp, useClerk } from '@clerk/expo';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,8 @@ export default function LoginScreen() {
   const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -29,6 +31,7 @@ export default function LoginScreen() {
   const { startSSOFlow } = useSSO();
   const { signIn, setActive: setSignInActive } = useSignIn();
   const { signUp, setActive: setSignUpActive } = useSignUp();
+  const clerk = useClerk() as any;
 
   // --- OAuth ---
   const handleSSO = async (strategy: 'oauth_apple' | 'oauth_google') => {
@@ -53,12 +56,16 @@ export default function LoginScreen() {
     if (!signIn) return;
     setLoading(true);
     try {
-      const result = await signIn.create({ identifier: email, password });
-      if (result.status === 'complete') {
-        await setSignInActive({ session: result.createdSessionId });
+      await signIn.create({ identifier: email });
+      const rawSignIn = clerk?.client?.signIn;
+      await rawSignIn.attemptFirstFactor({ strategy: 'password', password });
+      if (rawSignIn.status === 'complete' && rawSignIn.createdSessionId) {
+        await setSignInActive({ session: rawSignIn.createdSessionId });
+      } else {
+        Alert.alert('Sign in failed', 'Please check your email and password.');
       }
     } catch (err: any) {
-      Alert.alert('Sign in failed', err?.errors?.[0]?.longMessage ?? 'Check your email and password.');
+      Alert.alert('Sign in failed', err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? 'Check your email and password.');
     } finally {
       setLoading(false);
     }
@@ -69,11 +76,19 @@ export default function LoginScreen() {
     if (!signUp) return;
     setLoading(true);
     try {
-      await signUp.create({ emailAddress: email, password });
-      await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
-      setMode('verify');
+      await signUp.create({ emailAddress: email, password, firstName, lastName });
+      if (signUp.status === 'complete') {
+        await clerk.setActive({ session: signUp.createdSessionId });
+      } else if (signUp.status === 'missing_requirements') {
+        // Email verification required — send code and show verify screen
+        await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+        setMode('verify');
+      } else {
+        Alert.alert('Sign up failed', 'Please check your details and try again.');
+      }
     } catch (err: any) {
-      Alert.alert('Sign up failed', err?.errors?.[0]?.longMessage ?? 'Try again.');
+      const msg = err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? JSON.stringify(err);
+      Alert.alert('Sign up failed', msg);
     } finally {
       setLoading(false);
     }
@@ -198,6 +213,36 @@ export default function LoginScreen() {
             <View style={s.dividerLine} />
           </View>
 
+          {/* First + Last name (sign up only) */}
+          {!isSignIn && (
+            <View style={[s.card, { marginBottom: 12 }]}>
+              <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
+              <View style={s.cardTint} />
+              <View style={s.cardHighlight} />
+              <View style={{ flexDirection: 'row' }}>
+                <TextInput
+                  style={[s.input, { flex: 1 }]}
+                  placeholder="First name"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  value={firstName}
+                  onChangeText={setFirstName}
+                  autoCapitalize="words"
+                  selectionColor="rgba(255,255,255,0.5)"
+                />
+                <View style={{ width: 1, backgroundColor: 'rgba(255,255,255,0.08)', marginVertical: 12 }} />
+                <TextInput
+                  style={[s.input, { flex: 1 }]}
+                  placeholder="Last name"
+                  placeholderTextColor="rgba(255,255,255,0.28)"
+                  value={lastName}
+                  onChangeText={setLastName}
+                  autoCapitalize="words"
+                  selectionColor="rgba(255,255,255,0.5)"
+                />
+              </View>
+            </View>
+          )}
+
           {/* Email + password */}
           <View style={s.card}>
             <BlurView intensity={24} tint="dark" style={StyleSheet.absoluteFill} />
@@ -237,9 +282,9 @@ export default function LoginScreen() {
 
           {/* Primary action */}
           <TouchableOpacity
-            style={[s.primaryBtn, (loading || !email || !password) && { opacity: 0.5 }]}
+            style={[s.primaryBtn, (loading || !email || !password || (!isSignIn && (!firstName || !lastName))) && { opacity: 0.5 }]}
             onPress={isSignIn ? handleSignIn : handleSignUp}
-            disabled={loading || !email || !password}
+            disabled={loading || !email || !password || (!isSignIn && (!firstName || !lastName))}
             activeOpacity={0.85}
           >
             {loading
