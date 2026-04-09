@@ -1,174 +1,341 @@
-import React from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Platform,
+  View, Text, StyleSheet, TouchableOpacity, FlatList,
+  TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { GlassCard } from '../components/GlassCard';
+import { API_BASE } from '../config';
+import { useAuthFetch } from '../hooks/useAuthFetch';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
+interface Message {
+  id: string;
+  role: 'user' | 'coach';
+  text: string;
+}
+
 interface Props { colors: Record<string, string>; }
 
-const FEATURES = [
-  { icon: 'analytics-outline' as const, label: 'Training Analysis', desc: 'Deep insights on your volume, frequency and progression trends.' },
-  { icon: 'trending-up-outline' as const, label: 'PR Predictions', desc: 'Know when you\'re ready to hit a new personal record.' },
-  { icon: 'heart-outline' as const, label: 'Recovery Insights', desc: 'Coaching that adjusts to your sleep, HRV and recovery state.' },
+const STARTERS = [
+  "How's my training looking lately?",
+  "What should I focus on next session?",
+  "Why might my progress be stalling?",
 ];
 
 export default function CoachScreen({ colors }: Props) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+  const listRef = useRef<FlatList>(null);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
+  const authFetch = useAuthFetch();
+
+  const scrollToBottom = () =>
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+
+  const send = useCallback(async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+
+    const userMsg: Message = { id: Date.now().toString(), role: 'user', text: trimmed };
+    setMessages(prev => [...prev, userMsg]);
+    setInput('');
+    setLoading(true);
+    scrollToBottom();
+
+    try {
+      // Build history for backend (snapshot before adding current message)
+      const chatHistory = messages.map(m => ({
+        role: m.role === 'user' ? 'user' : 'model',
+        text: m.text,
+      }));
+
+      const res = await authFetch(`${API_BASE}/api/ai/coach`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: trimmed, chatHistory }),
+      });
+      const data = await res.json();
+
+      const coachMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'coach',
+        text: data.reply || 'Sorry, I had trouble with that one.',
+      };
+      setMessages(prev => [...prev, coachMsg]);
+      scrollToBottom();
+    } catch {
+      const errMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'coach',
+        text: 'Connection issue. Check your network and try again.',
+      };
+      setMessages(prev => [...prev, errMsg]);
+    } finally {
+      setLoading(false);
+    }
+  }, [messages, loading, authFetch]);
+
+  const renderMessage = ({ item }: { item: Message }) => {
+    const isUser = item.role === 'user';
+    return (
+      <View style={[s.msgRow, isUser && s.msgRowUser]}>
+        {!isUser && (
+          <View style={s.coachAvatar}>
+            <Ionicons name="flash" size={12} color="rgba(255,255,255,0.65)" />
+          </View>
+        )}
+        <View style={[s.bubble, isUser ? s.bubbleUser : s.bubbleCoach]}>
+          <Text style={[s.bubbleText, isUser && s.bubbleTextUser]}>{item.text}</Text>
+        </View>
+      </View>
+    );
+  };
 
   return (
-    <View style={s.root}>
-      {/* Back button */}
-      <TouchableOpacity
-        style={[s.backBtn, { top: insets.top + 12 }]}
-        onPress={() => navigation.navigate('Home' as never)}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.70)" />
-      </TouchableOpacity>
+    <KeyboardAvoidingView
+      style={s.root}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={0}
+    >
+      {/* Header */}
+      <View style={[s.header, { paddingTop: insets.top + 12 }]}>
+        <TouchableOpacity
+          style={s.backBtn}
+          onPress={() => navigation.navigate('Home' as never)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.70)" />
+        </TouchableOpacity>
+        <View style={s.headerCenter}>
+          <Ionicons name="flash" size={13} color="rgba(255,255,255,0.45)" style={{ marginRight: 5 }} />
+          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>LOFTE Coach</Text>
+        </View>
+        <View style={{ width: 38 }} />
+      </View>
 
-      <ScrollView
+      {/* Messages */}
+      <FlatList
+        ref={listRef}
+        data={messages}
+        keyExtractor={item => item.id}
+        renderItem={renderMessage}
         contentContainerStyle={[
-          s.content,
-          { paddingTop: insets.top + 64, paddingBottom: insets.bottom + 40 },
+          s.listContent,
+          messages.length === 0 && s.listEmpty,
         ]}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Hero */}
-        <View style={s.hero}>
-          {/* Coach icon */}
-          <View style={s.iconCircle}>
-            <View style={s.iconHighlight} />
-            <Ionicons name="flash" size={36} color="rgba(255,255,255,0.85)" />
+        onContentSizeChange={scrollToBottom}
+        ListEmptyComponent={(
+          <View style={s.emptyState}>
+            <View style={s.emptyIcon}>
+              <Ionicons name="flash" size={30} color="rgba(255,255,255,0.50)" />
+            </View>
+            <Text style={[s.emptyTitle, { fontFamily: SERIF }]}>Ask your coach</Text>
+            <Text style={s.emptySubtitle}>Trained on your full workout history</Text>
+            <View style={s.starterList}>
+              {STARTERS.map(q => (
+                <TouchableOpacity
+                  key={q}
+                  style={s.starterPill}
+                  onPress={() => send(q)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={s.starterText}>{q}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-
-          <Text style={[s.heroTitle, { fontFamily: SERIF }]}>LOFTE Coach</Text>
-          <Text style={s.heroSubtitle}>Trained on your full training history</Text>
-
-          {/* Coming soon badge */}
-          <View style={s.badge}>
-            <View style={s.badgeDot} />
-            <Text style={s.badgeText}>COMING SOON</Text>
+        )}
+        ListFooterComponent={loading ? (
+          <View style={s.msgRow}>
+            <View style={s.coachAvatar}>
+              <Ionicons name="flash" size={12} color="rgba(255,255,255,0.65)" />
+            </View>
+            <View style={[s.bubble, s.bubbleCoach, s.typingBubble]}>
+              <ActivityIndicator size="small" color="rgba(255,255,255,0.40)" />
+            </View>
           </View>
+        ) : null}
+      />
+
+      {/* Input bar */}
+      <View style={[s.inputBar, { paddingBottom: insets.bottom + 8 }]}>
+        <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={s.inputBarBorder} />
+        <View style={s.inputRow}>
+          <TextInput
+            style={s.input}
+            placeholder="Ask your coach..."
+            placeholderTextColor="rgba(255,255,255,0.28)"
+            value={input}
+            onChangeText={setInput}
+            multiline
+            maxLength={500}
+            selectionColor="rgba(255,255,255,0.5)"
+          />
+          <TouchableOpacity
+            style={[s.sendBtn, (!input.trim() || loading) && s.sendBtnDisabled]}
+            onPress={() => send(input)}
+            disabled={!input.trim() || loading}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="arrow-up"
+              size={17}
+              color={input.trim() && !loading ? '#fff' : 'rgba(255,255,255,0.22)'}
+            />
+          </TouchableOpacity>
         </View>
-
-        {/* Main card */}
-        <GlassCard style={s.mainCard}>
-          <Text style={s.mainCardTitle}>What is LOFTE Coach?</Text>
-          <Text style={s.mainCardBody}>
-            An AI coach that actually knows your training. Unlike generic fitness chatbots,
-            LOFTE Coach has full context — your complete workout history, PRs, volume trends,
-            and recovery data.
-          </Text>
-          <Text style={s.mainCardBody}>
-            Ask it anything. "Why has my bench been stuck for 3 weeks?" It will look at your
-            data and give you a real answer.
-          </Text>
-        </GlassCard>
-
-        {/* Feature cards */}
-        <View style={s.featureList}>
-          {FEATURES.map(({ icon, label, desc }) => (
-            <GlassCard key={label} padding={16} style={s.featureCard}>
-              <View style={s.featureRow}>
-                <View style={s.featureIcon}>
-                  <Ionicons name={icon} size={20} color="rgba(255,255,255,0.75)" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.featureLabel}>{label}</Text>
-                  <Text style={s.featureDesc}>{desc}</Text>
-                </View>
-              </View>
-            </GlassCard>
-          ))}
-        </View>
-
-        {/* Notify CTA (visual only) */}
-        <TouchableOpacity style={s.notifyBtn} activeOpacity={0.85}>
-          <Text style={s.notifyBtnText}>Notify me when it's ready</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
-  content: { paddingHorizontal: 24 },
 
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
   backBtn: {
-    position: 'absolute', left: 20,
     width: 38, height: 38, borderRadius: 19,
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
-    zIndex: 10,
+  },
+  headerCenter: {
+    flexDirection: 'row', alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 17, fontWeight: '400', color: '#fff',
   },
 
-  hero: { alignItems: 'center', marginBottom: 32 },
-
-  iconCircle: {
-    width: 96, height: 96, borderRadius: 48,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center', justifyContent: 'center',
-    marginBottom: 20, overflow: 'hidden',
+  listContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
-  iconHighlight: {
-    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
-    backgroundColor: 'rgba(255,255,255,0.28)',
+  listEmpty: {
+    flex: 1,
+    justifyContent: 'center',
   },
 
-  heroTitle: { fontSize: 32, fontWeight: '400', color: '#fff', marginBottom: 6 },
-  heroSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.45)', letterSpacing: 0.3, marginBottom: 16 },
-
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    paddingHorizontal: 14, paddingVertical: 6,
-    borderRadius: 100,
-    backgroundColor: 'rgba(124,58,237,0.15)',
-    borderWidth: 1, borderColor: 'rgba(124,58,237,0.40)',
-  },
-  badgeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#7C3AED' },
-  badgeText: {
-    fontSize: 10, fontWeight: '700', color: '#A78BFA',
-    letterSpacing: 1.5, textTransform: 'uppercase',
-  },
-
-  mainCard: { marginBottom: 12 },
-  mainCardTitle: {
-    fontSize: 15, fontWeight: '600', color: '#fff',
-    marginBottom: 10,
-  },
-  mainCardBody: {
-    fontSize: 14, color: 'rgba(255,255,255,0.65)',
-    lineHeight: 22, marginBottom: 10,
-  },
-
-  featureList: { gap: 8, marginBottom: 24 },
-  featureCard: {},
-  featureRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
-  featureIcon: {
-    width: 40, height: 40, borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  featureLabel: { fontSize: 14, fontWeight: '600', color: '#fff', marginBottom: 4 },
-  featureDesc: { fontSize: 12, color: 'rgba(255,255,255,0.50)', lineHeight: 18 },
-
-  notifyBtn: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 18, paddingVertical: 16,
+  emptyState: {
     alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  emptyIcon: {
+    width: 72, height: 72, borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 24, fontWeight: '400', color: '#fff', marginBottom: 6,
+  },
+  emptySubtitle: {
+    fontSize: 13, color: 'rgba(255,255,255,0.40)',
+    marginBottom: 28, letterSpacing: 0.2,
+  },
+  starterList: { width: '100%', gap: 8 },
+  starterPill: {
+    paddingHorizontal: 18, paddingVertical: 13,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+  },
+  starterText: {
+    fontSize: 14, color: 'rgba(255,255,255,0.65)',
+    fontWeight: '400',
+  },
+
+  msgRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    marginBottom: 10,
+    gap: 8,
+  },
+  msgRowUser: {
+    justifyContent: 'flex-end',
+  },
+
+  coachAvatar: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center', justifyContent: 'center',
+    flexShrink: 0,
+  },
+
+  bubble: {
+    maxWidth: '78%',
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 18,
+  },
+  bubbleUser: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)',
+    borderBottomRightRadius: 4,
+  },
+  bubbleCoach: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
+    borderBottomLeftRadius: 4,
+  },
+  bubbleText: {
+    fontSize: 15, color: 'rgba(255,255,255,0.60)', lineHeight: 22,
+  },
+  bubbleTextUser: {
+    color: '#fff',
+  },
+  typingBubble: {
+    paddingVertical: 12, paddingHorizontal: 16,
+  },
+
+  inputBar: {
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
-  notifyBtnText: { fontSize: 15, fontWeight: '600', color: 'rgba(255,255,255,0.75)' },
+  inputBarBorder: {
+    position: 'absolute', top: 0, left: 0, right: 0, height: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    gap: 10,
+    zIndex: 1,
+  },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    color: '#fff',
+    maxHeight: 120,
+    paddingVertical: 8,
+  },
+  sendBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 2,
+  },
+  sendBtnDisabled: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
 });

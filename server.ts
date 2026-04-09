@@ -406,6 +406,89 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
     }
   });
 
+  // ── LOFTE Coach ──────────────────────────────────────────────────────────────
+  app.post("/api/ai/coach", requireAuth, async (req: any, res) => {
+    const { message, chatHistory = [] } = req.body;
+    if (!message) return res.status(400).json({ error: "message is required" });
+
+    try {
+      const allWorkouts = await dbGetWorkouts(req.userId);
+
+      // Last 90 days
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 90);
+      const recentWorkouts = allWorkouts.filter((w: any) => new Date(w.date) >= cutoff);
+
+      // All-time PRs per exercise
+      const prBests: Record<string, number> = {};
+      allWorkouts.forEach((w: any) => w.exercises.forEach((e: any) => {
+        if (!e.weight) return;
+        const key = e.name.toLowerCase();
+        if (!prBests[key] || e.weight > prBests[key]) prBests[key] = e.weight;
+      }));
+
+      // Streak
+      const trainedDays = new Set(allWorkouts.map((w: any) => w.date.slice(0, 10)));
+      let streak = 0;
+      const streakDate = new Date();
+      while (true) {
+        const key = streakDate.toISOString().slice(0, 10);
+        if (trainedDays.has(key)) { streak++; streakDate.setDate(streakDate.getDate() - 1); }
+        else break;
+      }
+
+      // Recent sessions (last 10)
+      const recentLines = recentWorkouts.slice(0, 10).map((w: any) => {
+        const exLines = w.exercises.map((e: any) => {
+          if (e.weight) return `${e.name}: ${e.sets}x${e.reps} @ ${e.weight}lbs`;
+          if (e.distance) return `${e.name}: ${(e.distance / 1000).toFixed(1)}km`;
+          return e.name;
+        }).join(', ');
+        return `${w.date.slice(0, 10)}: ${exLines || 'no exercises recorded'}`;
+      }).join('\n');
+
+      const prLines = Object.entries(prBests)
+        .map(([name, weight]) => `${name}: ${weight}lbs`)
+        .join(', ') || 'None yet';
+
+      const systemInstruction = `You are LOFTE Coach, an elite personal training AI built into the LOFTE app. You have full access to this athlete's training data.
+
+ATHLETE DATA (last 90 days):
+- Sessions: ${recentWorkouts.length}
+- Current streak: ${streak} day${streak !== 1 ? 's' : ''}
+- All-time PRs: ${prLines}
+
+RECENT WORKOUTS:
+${recentLines || 'No workouts logged yet.'}
+
+RULES:
+- Be direct and specific. Reference their actual numbers.
+- Keep responses concise — 2-4 sentences unless they ask for a breakdown.
+- Never be generic. If data is insufficient, say so honestly.
+- Plain English only, no markdown or bullet points unless explicitly asked.
+- You are encouraging but honest. Don't sugarcoat plateaus.`;
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      const contents: any[] = (chatHistory as any[]).map((msg: any) => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.text }],
+      }));
+      contents.push({ role: 'user', parts: [{ text: message }] });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents,
+        config: { systemInstruction },
+      });
+
+      res.json({ reply: response.text.trim() });
+    } catch (error: any) {
+      console.error("Coach error:", error);
+      res.status(500).json({ error: error.message || "Coach failed" });
+    }
+  });
+
   const listenPort = Number(process.env.PORT) || PORT;
   app.listen(listenPort, "0.0.0.0", () => console.log(`Server running on http://localhost:${listenPort}`));
 }
