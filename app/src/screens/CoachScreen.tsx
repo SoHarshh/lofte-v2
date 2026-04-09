@@ -20,6 +20,12 @@ interface Message {
 
 interface Props { colors: Record<string, string>; }
 
+const NYX_INTRO: Message = {
+  id: 'nyx-intro',
+  role: 'coach',
+  text: "Hey, I'm Nyx — your personal training AI. I have full access to your workout history, PRs, and training patterns.\n\nI can help you break through plateaus, plan your next session, understand your progress trends, or answer any training question you have.\n\nWhere do you want to start?",
+};
+
 const STARTERS = [
   "How's my training looking lately?",
   "What should I focus on next session?",
@@ -27,7 +33,7 @@ const STARTERS = [
 ];
 
 export default function CoachScreen({ colors }: Props) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([NYX_INTRO]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -49,11 +55,13 @@ export default function CoachScreen({ colors }: Props) {
     scrollToBottom();
 
     try {
-      // Build history for backend (snapshot before adding current message)
-      const chatHistory = messages.map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        text: m.text,
-      }));
+      // Build history for backend — exclude the static intro message
+      const chatHistory = messages
+        .filter(m => m.id !== 'nyx-intro')
+        .map(m => ({
+          role: m.role === 'user' ? 'user' : 'model',
+          text: m.text,
+        }));
 
       const res = await authFetch(`${API_BASE}/api/ai/coach`, {
         method: 'POST',
@@ -87,7 +95,7 @@ export default function CoachScreen({ colors }: Props) {
       <View style={[s.msgRow, isUser && s.msgRowUser]}>
         {!isUser && (
           <View style={s.coachAvatar}>
-            <Ionicons name="flash" size={12} color="rgba(255,255,255,0.65)" />
+            <Ionicons name="sparkles" size={12} color="rgba(255,255,255,0.65)" />
           </View>
         )}
         <View style={[s.bubble, isUser ? s.bubbleUser : s.bubbleCoach]}>
@@ -113,8 +121,8 @@ export default function CoachScreen({ colors }: Props) {
           <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.70)" />
         </TouchableOpacity>
         <View style={s.headerCenter}>
-          <Ionicons name="flash" size={13} color="rgba(255,255,255,0.45)" style={{ marginRight: 5 }} />
-          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>LOFTE Coach</Text>
+          <Ionicons name="sparkles" size={13} color="rgba(255,255,255,0.45)" style={{ marginRight: 5 }} />
+          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>Nyx</Text>
         </View>
         <View style={{ width: 38 }} />
       </View>
@@ -134,7 +142,7 @@ export default function CoachScreen({ colors }: Props) {
         ListEmptyComponent={(
           <View style={s.emptyState}>
             <View style={s.emptyIcon}>
-              <Ionicons name="flash" size={30} color="rgba(255,255,255,0.50)" />
+              <Ionicons name="sparkles" size={30} color="rgba(255,255,255,0.50)" />
             </View>
             <Text style={[s.emptyTitle, { fontFamily: SERIF }]}>Ask your coach</Text>
             <Text style={s.emptySubtitle}>Trained on your full workout history</Text>
@@ -155,7 +163,7 @@ export default function CoachScreen({ colors }: Props) {
         ListFooterComponent={loading ? (
           <View style={s.msgRow}>
             <View style={s.coachAvatar}>
-              <Ionicons name="flash" size={12} color="rgba(255,255,255,0.65)" />
+              <Ionicons name="sparkles" size={12} color="rgba(255,255,255,0.65)" />
             </View>
             <View style={[s.bubble, s.bubbleCoach, s.typingBubble]}>
               <ActivityIndicator size="small" color="rgba(255,255,255,0.40)" />

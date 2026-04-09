@@ -93,7 +93,7 @@ function FloatingTabBar({ state, navigation }: any) {
         activeOpacity={0.8}
       >
         <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
-        <Ionicons name="flash" size={22} color="rgba(255,255,255,0.85)" />
+        <Ionicons name="sparkles" size={20} color="rgba(255,255,255,0.85)" />
       </TouchableOpacity>
     </View>
   );
