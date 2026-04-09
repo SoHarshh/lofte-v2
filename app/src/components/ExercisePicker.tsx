@@ -84,6 +84,7 @@ export function ExercisePicker({ visible, onSelect, onClose }: Props) {
             showsHorizontalScrollIndicator={false}
             keyExtractor={item => item}
             contentContainerStyle={s.pillRow}
+            ItemSeparatorComponent={() => <View style={s.pillSpacer} />}
             renderItem={({ item }) => {
               const active = item === 'All' ? !selectedMuscle : selectedMuscle === item;
               return (
@@ -167,8 +168,11 @@ const s = StyleSheet.create({
     flex: 1, fontSize: 15, color: '#fff',
   },
   pillRow: {
-    paddingHorizontal: 16, paddingBottom: 12, gap: 8,
+    paddingHorizontal: 16, paddingBottom: 12, paddingVertical: 4,
     zIndex: 1,
+  },
+  pillSpacer: {
+    width: 8,
   },
   pill: {
     paddingHorizontal: 14, paddingVertical: 6,
