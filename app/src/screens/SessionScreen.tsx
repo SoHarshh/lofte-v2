@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
+import { ExercisePicker } from '../components/ExercisePicker';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -37,6 +38,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [prs, setPRs] = useState<any[]>([]);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [showExercisePicker, setShowExercisePicker] = useState(false);
   const [tick, setTick] = useState(0);
   const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
   const transcriptRef = useRef<ScrollView>(null);
@@ -296,14 +298,13 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     }
   };
 
-  // --- Add to transcript (auto-starts session) ---
-  const addToTranscript = async (
+  // --- Add to transcript (instant — no awaiting) ---
+  const addToTranscript = (
     method: 'voice' | 'text' | 'camera',
     raw: string,
     exercises: Exercise[],
     notes?: string
   ) => {
-    // Auto-start the session on first log
     if (!session.isActive) onStart();
 
     const entry: TranscriptEntry = {
@@ -314,27 +315,28 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       exercises,
     };
 
-    // Fetch last performance for progressive overload hints
+    const current = sessionRef.current;
+    onUpdate({
+      transcript: [...current.transcript, entry],
+      exercises: [...current.exercises, ...exercises],
+      notes: notes || current.notes,
+    });
+
+    setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
+
+    // Fetch overload hints in background — never blocks the UI
     for (const ex of exercises) {
       const key = ex.name.toLowerCase();
       if (lastPerformance[key] !== undefined) continue;
-      try {
-        const r = await fetch(`${API_BASE}/api/exercises/last?name=${encodeURIComponent(ex.name)}`);
-        const last = await r.json();
-        setLastPerformance(prev => ({ ...prev, [key]: last }));
-      } catch {
-        setLastPerformance(prev => ({ ...prev, [key]: null }));
-      }
+      getToken().then(token => {
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        return fetch(`${API_BASE}/api/exercises/last?name=${encodeURIComponent(ex.name)}`, { headers });
+      })
+        .then(r => r.json())
+        .then(last => setLastPerformance(prev => ({ ...prev, [key]: last })))
+        .catch(() => setLastPerformance(prev => ({ ...prev, [key]: null })));
     }
-
-    onUpdate({
-      transcript: [...session.transcript, entry],
-      exercises: [...session.exercises, ...exercises],
-      notes: notes || session.notes,
-    });
-
-    // Scroll transcript to bottom
-    setTimeout(() => transcriptRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   const removeEntry = (id: string) => {
@@ -597,17 +599,17 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           <View style={s.manualPanel}>
             <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
 
-            {/* Exercise name */}
-            <TextInput
-              style={s.exerciseNameInput}
-              placeholder="Exercise name..."
-              placeholderTextColor="rgba(255,255,255,0.28)"
-              value={manualExercise}
-              onChangeText={setManualExercise}
-              autoFocus
-              selectionColor="rgba(255,255,255,0.5)"
-              returnKeyType="next"
-            />
+            {/* Exercise name — tap to open picker */}
+            <TouchableOpacity
+              style={s.exercisePickerBtn}
+              onPress={() => setShowExercisePicker(true)}
+              activeOpacity={0.75}
+            >
+              <Text style={[s.exercisePickerText, !manualExercise && s.exercisePickerPlaceholder]}>
+                {manualExercise || 'Select exercise...'}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.35)" />
+            </TouchableOpacity>
             <View style={s.manualDivider} />
 
             {/* Weight + Reps */}
@@ -719,6 +721,13 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Exercise picker */}
+      <ExercisePicker
+        visible={showExercisePicker}
+        onSelect={name => setManualExercise(name)}
+        onClose={() => setShowExercisePicker(false)}
+      />
 
       {/* Processing overlay */}
       {isProcessing && (
@@ -903,9 +912,15 @@ const s = StyleSheet.create({
     borderRadius: 24, overflow: 'hidden',
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
   },
-  exerciseNameInput: {
-    fontSize: 22, fontWeight: '500', color: '#fff',
+  exercisePickerBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingBottom: 12, zIndex: 1,
+  },
+  exercisePickerText: {
+    fontSize: 22, fontWeight: '500', color: '#fff', flex: 1,
+  },
+  exercisePickerPlaceholder: {
+    color: 'rgba(255,255,255,0.28)',
   },
   manualDivider: {
     height: 1, backgroundColor: 'rgba(255,255,255,0.10)', marginBottom: 16,
