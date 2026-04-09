@@ -121,9 +121,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
         <View style={styles.header}>
           <View style={{ width: 40 }} />
           <Text style={styles.logo}>LOFTE</Text>
-          <TouchableOpacity style={styles.headerBtn} activeOpacity={0.7}>
-            <Ionicons name="settings-outline" size={20} color="rgba(255,255,255,0.50)" />
-          </TouchableOpacity>
+          <View style={{ width: 40 }} />
         </View>
 
         {/* Score circles */}

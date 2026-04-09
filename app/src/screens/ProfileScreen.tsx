@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Platform, Image,
+  TouchableOpacity, ActivityIndicator, Platform, Image, Switch,
 } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,20 +41,28 @@ function formatVol(v: number): string {
   return `${Math.round(v)}`;
 }
 
-const SETTINGS = [
-  { icon: 'person-outline' as const, label: 'Personal Information' },
-  { icon: 'barbell-outline' as const, label: 'Workout Preferences' },
-  { icon: 'watch-outline' as const, label: 'Connected Devices' },
-  { icon: 'scale-outline' as const, label: 'Units & Measurements' },
+const CONNECTED_DEVICES = [
+  { icon: 'heart-outline' as const, label: 'Apple Health' },
+  { icon: 'watch-outline' as const, label: 'Whoop' },
 ];
 
 export default function ProfileScreen({ colors }: Props) {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
+  const [useKg, setUseKg] = useState(false);
   const insets = useSafeAreaInsets();
   const { user } = useUser();
   const { signOut } = useAuth();
   const authFetch = useAuthFetch();
+
+  useEffect(() => {
+    SecureStore.getItemAsync('units_kg').then(v => { if (v === 'true') setUseKg(true); });
+  }, []);
+
+  const toggleUnits = (val: boolean) => {
+    setUseKg(val);
+    SecureStore.setItemAsync('units_kg', String(val));
+  };
 
   const displayName = user?.fullName || user?.firstName || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Athlete';
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
@@ -74,10 +83,23 @@ export default function ProfileScreen({ colors }: Props) {
   const totalVolume = workouts.reduce((a, w) => a + sessionVolume(w), 0);
   const streak = calcStreak(workouts);
 
+  // Count unique exercise PRs (highest weight ever per exercise)
+  const prCount = (() => {
+    const bests: Record<string, number> = {};
+    [...workouts].reverse().forEach(w =>
+      w.exercises.forEach(e => {
+        if (!e.weight) return;
+        const key = e.name.toLowerCase();
+        if (!bests[key] || e.weight > bests[key]) bests[key] = e.weight;
+      })
+    );
+    return Object.keys(bests).length;
+  })();
+
   if (loading) {
     return (
       <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="rgba(255,255,255,0.55)" size="large" />
       </View>
     );
   }
@@ -109,24 +131,45 @@ export default function ProfileScreen({ colors }: Props) {
           <StatCard value={String(totalSessions)} label="Sessions" icon="barbell-outline" />
           <StatCard value={formatVol(totalVolume)} label="Total Volume" icon="trending-up-outline" />
           <StatCard value={String(streak)} label="Day Streak" icon="flame-outline" />
-          <StatCard value="—" label="PRs Set" icon="trophy-outline" />
+          <StatCard value={String(prCount)} label="PRs Set" icon="trophy-outline" />
         </View>
 
-        {/* Settings section */}
-        <Text style={s.sectionTitle}>Settings</Text>
+        {/* Units */}
+        <Text style={s.sectionTitle}>Preferences</Text>
         <GlassCard padding={0} style={s.settingsCard}>
-          {SETTINGS.map(({ icon, label }, i) => (
-            <TouchableOpacity
+          <View style={s.settingsRow}>
+            <View style={s.settingsIconWrap}>
+              <Ionicons name="scale-outline" size={18} color="rgba(255,255,255,0.55)" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingsLabel}>Weight Unit</Text>
+              <Text style={s.settingsSubLabel}>{useKg ? 'Kilograms (kg)' : 'Pounds (lbs)'}</Text>
+            </View>
+            <Switch
+              value={useKg}
+              onValueChange={toggleUnits}
+              trackColor={{ false: 'rgba(255,255,255,0.15)', true: 'rgba(255,255,255,0.40)' }}
+              thumbColor="#fff"
+            />
+          </View>
+        </GlassCard>
+
+        {/* Connected Devices */}
+        <Text style={[s.sectionTitle, { marginTop: 24 }]}>Connected Devices</Text>
+        <GlassCard padding={0} style={s.settingsCard}>
+          {CONNECTED_DEVICES.map(({ icon, label }, i) => (
+            <View
               key={label}
-              style={[s.settingsRow, i < SETTINGS.length - 1 && s.settingsRowBorder]}
-              activeOpacity={0.7}
+              style={[s.settingsRow, i < CONNECTED_DEVICES.length - 1 && s.settingsRowBorder]}
             >
               <View style={s.settingsIconWrap}>
-                <Ionicons name={icon} size={18} color="rgba(255,255,255,0.55)" />
+                <Ionicons name={icon} size={18} color="rgba(255,255,255,0.35)" />
               </View>
-              <Text style={s.settingsLabel}>{label}</Text>
-              <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
-            </TouchableOpacity>
+              <Text style={[s.settingsLabel, { color: 'rgba(255,255,255,0.45)' }]}>{label}</Text>
+              <View style={s.comingSoonBadge}>
+                <Text style={s.comingSoonText}>Soon</Text>
+              </View>
+            </View>
           ))}
         </GlassCard>
 
@@ -207,7 +250,14 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center', justifyContent: 'center',
   },
-  settingsLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.80)' },
+  settingsLabel: { fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.80)' },
+  settingsSubLabel: { fontSize: 11, color: 'rgba(255,255,255,0.35)', marginTop: 2 },
+  comingSoonBadge: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)',
+  },
+  comingSoonText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.40)', letterSpacing: 1 },
 
   signOutBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',

@@ -13,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 WebBrowser.maybeCompleteAuthSession();
 
-type Mode = 'signin' | 'signup' | 'verify';
+type Mode = 'signin' | 'signup' | 'verify' | 'forgot' | 'reset';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -25,8 +25,12 @@ export default function LoginScreen() {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [code, setCode] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [codeSent, setCodeSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
 
   const { startSSOFlow } = useSSO();
   const { signIn, setActive: setSignInActive } = useSignIn();
@@ -56,6 +60,8 @@ export default function LoginScreen() {
     if (!signIn) return;
     setLoading(true);
     try {
+      // Clear any stale Clerk session before starting a new sign-in
+      try { await clerk.signOut(); } catch {}
       await signIn.create({ identifier: email });
       const rawSignIn = clerk?.client?.signIn;
       await rawSignIn.attemptFirstFactor({ strategy: 'password', password });
@@ -76,6 +82,7 @@ export default function LoginScreen() {
     if (!signUp) return;
     setLoading(true);
     try {
+      try { await clerk.signOut(); } catch {}
       await signUp.create({ emailAddress: email, password, firstName, lastName });
       if (signUp.status === 'complete') {
         await clerk.setActive({ session: signUp.createdSessionId });
@@ -105,6 +112,49 @@ export default function LoginScreen() {
       }
     } catch (err: any) {
       Alert.alert('Invalid code', err?.errors?.[0]?.longMessage ?? 'Check the code and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Forgot password: send reset code ---
+  const handleForgotPassword = async () => {
+    if (!signIn || !email) return;
+    setLoading(true);
+    try {
+      await signIn.create({ strategy: 'reset_password_email_code', identifier: email });
+      setCodeSent(true);
+    } catch (err: any) {
+      Alert.alert('Error', err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? 'Could not send reset code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Reset password: verify code + set new password ---
+  const handleResetPassword = async () => {
+    if (!signIn) return;
+    setLoading(true);
+    try {
+      const rawSignIn = clerk?.client?.signIn;
+      await rawSignIn.attemptFirstFactor({
+        strategy: 'reset_password_email_code',
+        code: resetCode,
+        password: newPassword,
+      });
+      const sessionId = rawSignIn.createdSessionId;
+      if (sessionId) {
+        await clerk.setActive({ session: sessionId });
+      } else {
+        Alert.alert(
+          'Password updated',
+          'Your password has been changed. Sign in with your new password.',
+          [{ text: 'OK', onPress: () => { setMode('signin'); setCodeSent(false); setResetCode(''); setNewPassword(''); } }]
+        );
+      }
+    } catch (err: any) {
+      const msg = err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message;
+      Alert.alert('Reset failed', msg || 'Check your code and try again.');
     } finally {
       setLoading(false);
     }
@@ -153,6 +203,119 @@ export default function LoginScreen() {
 
             <TouchableOpacity onPress={() => setMode('signup')} style={s.linkBtn}>
               <Text style={s.linkText}>← Go back</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  }
+
+  // --- Forgot / Reset password (single screen) ---
+  if (mode === 'forgot' || mode === 'reset') {
+    return (
+      <View style={s.root}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={[s.scroll, { paddingTop: insets.top + 60, paddingBottom: insets.bottom + 40 }]}
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={s.iconCircle}>
+              <Ionicons name="lock-closed-outline" size={32} color="rgba(255,255,255,0.8)" />
+            </View>
+            <Text style={[s.title, { fontFamily: SERIF }]}>Reset password</Text>
+            <Text style={s.subtitle}>
+              {codeSent ? `Code sent to ${email}` : "Enter your email and we'll send a reset code"}
+            </Text>
+
+            {/* Email (always shown, locked after code sent) */}
+            <View style={[s.card, { marginBottom: 12 }]}>
+              <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
+              <TextInput
+                style={[s.input, codeSent && { color: 'rgba(255,255,255,0.40)' }]}
+                placeholder="Email"
+                placeholderTextColor="rgba(255,255,255,0.28)"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                selectionColor="rgba(255,255,255,0.5)"
+                editable={!codeSent}
+              />
+            </View>
+
+            {/* Send code button (shown before code is sent) */}
+            {!codeSent && (
+              <TouchableOpacity
+                style={[s.primaryBtn, (loading || !email) && { opacity: 0.5 }]}
+                onPress={handleForgotPassword}
+                disabled={loading || !email}
+              >
+                {loading
+                  ? <ActivityIndicator color="#050B14" />
+                  : <Text style={s.primaryBtnText}>Send Reset Code</Text>}
+              </TouchableOpacity>
+            )}
+
+            {/* Code + new password (shown after code is sent) */}
+            {codeSent && (
+              <>
+                <View style={s.card}>
+                  <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
+                  <TextInput
+                    style={s.input}
+                    placeholder="6-digit code"
+                    placeholderTextColor="rgba(255,255,255,0.28)"
+                    value={resetCode}
+                    onChangeText={setResetCode}
+                    keyboardType="number-pad"
+                    selectionColor="rgba(255,255,255,0.5)"
+                    autoFocus
+                  />
+                  <View style={s.inputDivider} />
+                  <View style={s.passwordRow}>
+                    <TextInput
+                      style={[s.input, { flex: 1, marginBottom: 0 }]}
+                      placeholder="New password"
+                      placeholderTextColor="rgba(255,255,255,0.28)"
+                      value={newPassword}
+                      onChangeText={setNewPassword}
+                      secureTextEntry={!showNewPassword}
+                      selectionColor="rgba(255,255,255,0.5)"
+                    />
+                    <TouchableOpacity onPress={() => setShowNewPassword(!showNewPassword)} style={s.eyeBtn}>
+                      <Ionicons
+                        name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                        size={18}
+                        color="rgba(255,255,255,0.40)"
+                      />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[s.primaryBtn, (loading || !resetCode || !newPassword) && { opacity: 0.5 }]}
+                  onPress={handleResetPassword}
+                  disabled={loading || !resetCode || !newPassword}
+                >
+                  {loading
+                    ? <ActivityIndicator color="#050B14" />
+                    : <Text style={s.primaryBtnText}>Reset Password</Text>}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => { setCodeSent(false); setResetCode(''); setNewPassword(''); }}
+                  style={s.linkBtn}
+                >
+                  <Text style={s.linkText}>Resend code</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity
+              onPress={() => { setMode('signin'); setCodeSent(false); setResetCode(''); setNewPassword(''); }}
+              style={s.linkBtn}
+            >
+              <Text style={s.linkText}>← Back to sign in</Text>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -283,6 +446,13 @@ export default function LoginScreen() {
               ? <ActivityIndicator color="#050B14" />
               : <Text style={s.primaryBtnText}>{isSignIn ? 'Sign In' : 'Create Account'}</Text>}
           </TouchableOpacity>
+
+          {/* Forgot password (sign in only) */}
+          {isSignIn && (
+            <TouchableOpacity onPress={() => setMode('forgot')} style={s.linkBtn}>
+              <Text style={s.linkText}>Forgot password?</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Toggle */}
           <TouchableOpacity
