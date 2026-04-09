@@ -10,7 +10,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@clerk/expo';
 import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { API_BASE } from '../config';
@@ -132,9 +132,8 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   const processVoiceEntry = async (entryId: string, uri: string) => {
     try {
-      const base64 = await FileSystem.readAsStringAsync(uri, {
-        encoding: 'base64' as any,
-      });
+      const file = new File(uri);
+      const base64 = await file.base64();
       const token = await getToken();
       const r = await fetch(`${API_BASE}/api/ai/parse-workout`, {
         method: 'POST',
