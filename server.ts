@@ -221,20 +221,36 @@ async function startServer() {
         return res.status(400).json({ error: "Provide either text or audioBase64" });
       }
 
-      const systemPrompt = `You are a workout logging assistant. Extract exercises from the input and return JSON.
+      const systemPrompt = `You are a workout logging assistant for a gym app. Your job is to extract exercise data from voice or text input and return structured JSON.
 
-For cardio (running, treadmill, cycling, rowing, swimming, walking, elliptical):
+RULES:
+- Be very generous in interpretation. Casual, incomplete, or noisy speech should still produce results.
+- Never return empty exercises if there is any exercise-related word in the input.
+- If sets/reps/weight are not mentioned, use sensible defaults (sets:1, reps:1, weight:0).
+- Accept kg or lbs — if kg is mentioned or implied, convert to lbs (1 kg = 2.205 lbs).
+- Understand gym slang: "plates" = 45 lbs each side, "bar" = 45 lbs, "bodyweight" or "BW" = weight 0.
+- Accept French gym terms too: "développé couché" = Bench Press, "squat" = Squat, "tractions" = Pull-ups, etc.
+
+For STRENGTH exercises:
+- muscleGroup: one of Chest, Back, Shoulders, Arms, Legs, Core
+- sets, reps as integers, weight in lbs
+
+For CARDIO (running, treadmill, cycling, rowing, swimming, walking, elliptical):
 - muscleGroup: "Cardio"
 - distance in meters (1 mile = 1609m, 1 km = 1000m)
 - duration in seconds
-- pace as a string like "12 min/mi" or "6.5 mph"
-- sets and reps: 0, weight: 0
+- pace as readable string like "6.5 mph" or "5:30 /km"
+- sets: 0, reps: 0, weight: 0
 
-For strength exercises:
-- muscleGroup: one of Chest, Back, Shoulders, Arms, Legs, Core
-- sets, reps, weight in lbs (bodyweight = 0)
+EXAMPLES:
+"3 sets bench 100" → Bench Press, sets:3, reps:1, weight:100, muscleGroup:Chest
+"did some squats" → Squat, sets:1, reps:1, weight:0, muscleGroup:Legs
+"5x5 deadlift 2 plates" → Deadlift, sets:5, reps:5, weight:135, muscleGroup:Back
+"ran 5k in 25 minutes" → Running, distance:5000, duration:1500, muscleGroup:Cardio
+"développé couché 3 fois 10 à 80 kilos" → Bench Press, sets:3, reps:10, weight:176, muscleGroup:Chest
 
-Normalize exercise names to proper case. Be generous — if the input vaguely mentions an exercise, include it. Return { exercises: [] } only if there is truly no exercise info.`;
+Return JSON: { "exercises": [ { "name": string, "muscleGroup": string, "sets": number, "reps": number, "weight": number, "distance": number, "duration": number, "pace": string } ] }
+Only return { "exercises": [] } if the input contains absolutely no reference to any physical exercise.`;
 
       const gptResponse = await openai.chat.completions.create({
         model: "gpt-4o-mini",
