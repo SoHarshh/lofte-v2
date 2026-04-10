@@ -229,7 +229,6 @@ Always normalize exercise names to proper case. Return empty exercises array onl
         const whisperResult = await openai.audio.transcriptions.create({
           file: audioFile,
           model: "whisper-1",
-          language: "en",
         });
         transcript = whisperResult.text;
         if (!transcript?.trim()) {

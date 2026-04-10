@@ -70,6 +70,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   // --- Voice PTT ---
   const startRecording = async () => {
+    if (isRecording) return;
     try {
       const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
@@ -526,26 +527,6 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           <Text style={s.voicePrompt}>
             {isRecording ? 'Listening...' : 'Hold mic to log your sets'}
           </Text>
-          <View style={s.micWrap}>
-            {/* Sonar rings */}
-            {isRecording && (
-              <>
-                <View style={[s.sonarRing, { width: 160, height: 160, borderRadius: 80, opacity: 0.15 }]} />
-                <View style={[s.sonarRing, { width: 200, height: 200, borderRadius: 100, opacity: 0.08 }]} />
-              </>
-            )}
-            <Pressable
-              style={[s.micBtn, isRecording && s.micBtnRecording]}
-              onPressIn={startRecording}
-              onPressOut={stopRecordingAndSubmit}
-            >
-              <Ionicons
-                name={isRecording ? 'stop' : 'mic'}
-                size={36}
-                color={isRecording ? '#050B14' : '#fff'}
-              />
-            </Pressable>
-          </View>
         </View>
 
         {/* Transcript scroll */}
