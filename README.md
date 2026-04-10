@@ -10,16 +10,20 @@ Available on **iOS via TestFlight**.
 
 | Feature | Status |
 |---------|--------|
-| Voice input → AI transcribe + parse → save | ✅ |
-| Text input → AI parse → save | ✅ |
-| Camera / photo → AI Vision analyze → save | ✅ |
+| Voice input → Whisper transcription → Gemini parse → save | ✅ |
+| Camera / photo → Gemini Vision analyze → save | ✅ |
+| Manual entry — instant, no blocking network call | ✅ |
+| Searchable exercise picker (70+ exercises by muscle group) | ✅ |
 | PR detection (auto-flags personal bests on save) | ✅ |
 | Progressive overload hints (shows last session's numbers) | ✅ |
 | Post-workout AI debrief | ✅ |
-| Workout history with delete | ✅ |
+| Nyx — AI coach with full workout history context | ✅ |
+| Workout history with expandable cards | ✅ |
 | Dashboard — volume trends + muscle group breakdown | ✅ |
 | Cardio logging (distance, duration, pace) | ✅ |
-| LOFTE Coach (AI coaching tab) | Coming soon |
+| Clerk auth — Apple SSO, Google SSO, email/password | ✅ |
+| Per-user data isolation (Clerk JWT on all endpoints) | ✅ |
+| Forgot password flow | ✅ |
 
 ---
 
@@ -28,14 +32,18 @@ Available on **iOS via TestFlight**.
 **Mobile App**
 - React Native + Expo SDK 55
 - TypeScript
-- expo-blur (frosted glass UI)
+- Clerk (`@clerk/expo`) — auth
+- expo-blur (frosted glass / glassmorphism UI)
 - expo-audio (voice recording)
-- expo-image-picker (camera / library)
+- expo-image-picker (camera)
+- expo-secure-store (local preferences)
 - React Navigation (bottom tabs)
 
 **Backend**
 - Express + TypeScript (tsx)
-- Google Gemini 2.5 Flash (audio + vision + text parsing)
+- OpenAI Whisper (`whisper-1`) — voice transcription
+- Google Gemini 2.5 Flash — exercise extraction, image parsing, debrief, Nyx coach
+- Clerk (`@clerk/backend`) — JWT verification
 - Supabase (Postgres database)
 - Deployed on Railway
 
@@ -48,14 +56,18 @@ lofte-v2/
 ├── app/                        — React Native / Expo app
 │   ├── src/
 │   │   ├── screens/
-│   │   │   ├── SessionScreen.tsx   — Active workout session
+│   │   │   ├── SessionScreen.tsx   — Active workout session (voice/camera/manual)
 │   │   │   ├── DashboardScreen.tsx — Analytics + charts
 │   │   │   ├── HistoryScreen.tsx   — Past workouts
 │   │   │   ├── ProfileScreen.tsx   — Stats + settings
-│   │   │   └── CoachScreen.tsx     — AI Coach (coming soon)
+│   │   │   ├── CoachScreen.tsx     — Nyx AI coach chat
+│   │   │   └── LoginScreen.tsx     — Auth (SSO + email/password + forgot password)
 │   │   ├── components/
-│   │   │   ├── AppBackground.tsx   — Global background image
-│   │   │   └── GlassCard.tsx       — Frosted glass card component
+│   │   │   ├── AppBackground.tsx   — Global background
+│   │   │   ├── GlassCard.tsx       — Frosted glass card component
+│   │   │   └── ExercisePicker.tsx  — Searchable exercise bottom sheet
+│   │   ├── data/exercises.ts       — 70+ exercises organised by muscle group
+│   │   ├── hooks/useAuthFetch.ts   — Authenticated fetch with Clerk JWT
 │   │   ├── types/index.ts          — TypeScript interfaces
 │   │   └── config.ts               — API base URL
 │   ├── assets/                 — Icons, splash, background
@@ -75,14 +87,11 @@ lofte-v2/
 ### Backend
 
 ```bash
-# Install dependencies
 npm install
 
-# Create .env
 cp .env.example .env
-# Fill in GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
+# Fill in GEMINI_API_KEY, OPENAI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY, CLERK_SECRET_KEY
 
-# Start server
 npm run dev
 # Runs on http://localhost:3000
 ```
@@ -97,7 +106,7 @@ npx expo start
 
 Scan the QR code with Expo Go, or run on a simulator.
 
-> For voice recording to work, a physical device is required.
+> Voice recording requires a physical device. Glassmorphism UI requires a real device or simulator with blur support.
 
 ---
 
@@ -105,8 +114,10 @@ Scan the QR code with Expo Go, or run on a simulator.
 
 ```
 GEMINI_API_KEY=        # Google AI Studio — aistudio.google.com/apikey
+OPENAI_API_KEY=        # OpenAI — platform.openai.com (Whisper voice transcription)
 SUPABASE_URL=          # Your Supabase project URL
 SUPABASE_SERVICE_KEY=  # Supabase service role key (secret)
+CLERK_SECRET_KEY=      # Clerk dashboard → API Keys
 ```
 
 The server falls back to SQLite if Supabase credentials are not set.
@@ -115,17 +126,18 @@ The server falls back to SQLite if Supabase credentials are not set.
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Health check |
-| POST | `/api/ai/parse-workout` | Parse text or audio into exercises |
-| POST | `/api/ai/parse-image` | Parse gym machine photo into exercises |
-| GET | `/api/workouts` | Fetch all workouts |
-| POST | `/api/workouts` | Save a workout, returns PR detections |
-| DELETE | `/api/workouts/:id` | Delete a workout |
-| GET | `/api/exercises/last` | Last logged performance for an exercise |
-| GET | `/api/exercises/history` | Full history for an exercise |
-| POST | `/api/workouts/:id/summary` | Generate AI post-workout debrief |
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/health` | — | Health check |
+| POST | `/api/ai/parse-workout` | — | Whisper transcription → Gemini exercise extraction |
+| POST | `/api/ai/parse-image` | — | Gemini Vision parse of gym machine photo |
+| GET | `/api/workouts` | ✅ | Fetch user's workouts |
+| POST | `/api/workouts` | ✅ | Save workout, returns PR detections |
+| DELETE | `/api/workouts/:id` | ✅ | Delete a workout |
+| GET | `/api/exercises/last` | ✅ | Last logged performance for an exercise |
+| GET | `/api/exercises/history` | ✅ | Full history for an exercise |
+| POST | `/api/workouts/:id/summary` | ✅ | Generate AI post-workout debrief |
+| POST | `/api/ai/coach` | ✅ | Nyx — multi-turn AI coach with 90-day workout context |
 
 ---
 
