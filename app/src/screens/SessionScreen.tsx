@@ -550,12 +550,17 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                       <Text style={s.entryPending}>{entry.raw}</Text>
                     </View>
                   ) : (
-                    entry.exercises?.map((ex, i) => (
-                      <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
-                        <Text style={s.entryName}>{ex.name}</Text>
-                        <Text style={s.entryStats}>{formatExStats(ex)}</Text>
-                      </View>
-                    ))
+                    <>
+                      {entry.exercises?.map((ex, i) => (
+                        <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
+                          <Text style={s.entryName}>{ex.name}</Text>
+                          <Text style={s.entryStats}>{formatExStats(ex)}</Text>
+                        </View>
+                      ))}
+                      {entry.method === 'voice' && entry.raw && entry.raw !== 'Voice log' && (
+                        <Text style={s.entryRaw}>"{entry.raw}"</Text>
+                      )}
+                    </>
                   )}
                 </View>
                 <Text style={s.entryTime}>
@@ -882,6 +887,7 @@ const s = StyleSheet.create({
   entryBody: { flex: 1, zIndex: 1 },
   entryName: { fontSize: 14, fontWeight: '600', color: '#fff' },
   entryStats: { fontSize: 13, color: 'rgba(255,255,255,0.60)', marginTop: 2 },
+  entryRaw: { fontSize: 11, color: 'rgba(255,255,255,0.30)', marginTop: 4, fontStyle: 'italic' },
   entryPending: { fontSize: 13, color: 'rgba(255,255,255,0.40)', fontStyle: 'italic' },
   entryTime: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 2, zIndex: 1 },
 
