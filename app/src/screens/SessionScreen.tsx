@@ -38,6 +38,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [prs, setPRs] = useState<any[]>([]);
   const [aiDebrief, setAiDebrief] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const recordingActiveRef = useRef(false);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
   const [tick, setTick] = useState(0);
   const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
@@ -70,10 +71,12 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   // --- Voice PTT ---
   const startRecording = async () => {
-    if (isRecording) return;
+    if (recordingActiveRef.current) return;
+    recordingActiveRef.current = true;
     try {
       const { granted } = await AudioModule.requestRecordingPermissionsAsync();
       if (!granted) {
+        recordingActiveRef.current = false;
         Alert.alert(
           'Microphone Access Required',
           'LOFTE needs microphone access to log workouts by voice. Enable it in Settings.',
@@ -89,12 +92,14 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       await audioRecorder.record();
       setIsRecording(true);
     } catch (err: any) {
+      recordingActiveRef.current = false;
       Alert.alert('Voice unavailable', err?.message ?? 'Could not start recording. Try again.');
     }
   };
 
   const stopRecordingAndSubmit = async () => {
-    if (!isRecording) return;
+    if (!recordingActiveRef.current) return;
+    recordingActiveRef.current = false;
     setIsRecording(false); // reset UI immediately — no stuck state
 
     let uri: string | null = null;
