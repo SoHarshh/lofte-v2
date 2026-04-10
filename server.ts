@@ -201,29 +201,10 @@ async function startServer() {
   app.post("/api/ai/parse-workout", async (req, res) => {
     const { text, audioBase64, mimeType } = req.body;
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const parts: any[] = [];
-      const systemPrompt = `Extract workout exercises from the input and return structured data.
-
-For cardio exercises (running, treadmill, cycling, rowing, swimming, walking, elliptical):
-- Set muscleGroup to "Cardio"
-- Set distance in meters (1 mile = 1609m, 1 km = 1000m)
-- Set duration in seconds
-- Set pace as a readable string like "12 min/mi" or "6.5 mph"
-- Set sets and reps to 0, weight to 0
-
-For strength exercises:
-- Set muscleGroup to the muscle worked: Chest, Back, Shoulders, Arms, Legs, Core
-- Set sets, reps, weight in lbs (bodyweight = 0)
-- Leave distance, duration, pace empty
-
-Always normalize exercise names to proper case. Return empty exercises array only if the input contains no exercise information.`;
-
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
       let transcript: string | undefined;
 
       if (audioBase64) {
-        // Transcribe with Whisper first, then extract with Gemini
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const audioBuffer = Buffer.from(audioBase64, "base64");
         const audioFile = new File([audioBuffer], "recording.m4a", { type: mimeType || "audio/m4a" });
         const whisperResult = await openai.audio.transcriptions.create({
@@ -234,44 +215,38 @@ Always normalize exercise names to proper case. Return empty exercises array onl
         if (!transcript?.trim()) {
           return res.json({ exercises: [], transcript: "" });
         }
-        parts.push({ text: `${systemPrompt}\n\nInput: "${transcript}"` });
       } else if (text) {
         transcript = text;
-        parts.push({ text: `${systemPrompt}\n\nInput: "${text}"` });
       } else {
         return res.status(400).json({ error: "Provide either text or audioBase64" });
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ parts }],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              date: { type: Type.STRING },
-              notes: { type: Type.STRING },
-              exercises: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    name: { type: Type.STRING }, muscleGroup: { type: Type.STRING },
-                    sets: { type: Type.NUMBER }, reps: { type: Type.NUMBER }, weight: { type: Type.NUMBER },
-                    distance: { type: Type.NUMBER }, duration: { type: Type.NUMBER },
-                    calories: { type: Type.NUMBER }, pace: { type: Type.STRING },
-                  },
-                  required: ["name"],
-                },
-              },
-            },
-            required: ["exercises"],
-          },
-        },
+      const systemPrompt = `You are a workout logging assistant. Extract exercises from the input and return JSON.
+
+For cardio (running, treadmill, cycling, rowing, swimming, walking, elliptical):
+- muscleGroup: "Cardio"
+- distance in meters (1 mile = 1609m, 1 km = 1000m)
+- duration in seconds
+- pace as a string like "12 min/mi" or "6.5 mph"
+- sets and reps: 0, weight: 0
+
+For strength exercises:
+- muscleGroup: one of Chest, Back, Shoulders, Arms, Legs, Core
+- sets, reps, weight in lbs (bodyweight = 0)
+
+Normalize exercise names to proper case. Be generous — if the input vaguely mentions an exercise, include it. Return { exercises: [] } only if there is truly no exercise info.`;
+
+      const gptResponse = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `Input: "${transcript}"` },
+        ],
       });
-      const parsed = JSON.parse(response.text);
-      res.json({ ...parsed, transcript });
+
+      const parsed = JSON.parse(gptResponse.choices[0].message.content ?? "{}");
+      res.json({ exercises: parsed.exercises ?? [], transcript });
     } catch (error: any) {
       console.error("AI parse-workout error:", error);
       res.status(500).json({ error: error.message || "AI processing failed" });
