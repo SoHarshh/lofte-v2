@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useState, useRef, useEffect } from 'react';
+import { NavigationContainer, useIsFocused } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { StatusBar } from 'expo-status-bar';
-import { View, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, ActivityIndicator, Animated } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +44,28 @@ const initialSession: SessionState = {
   exercises: [],
   notes: '',
 };
+
+function FadeScreen({ children }: { children: React.ReactNode }) {
+  const isFocused = useIsFocused();
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isFocused) {
+      opacity.setValue(0);
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 220,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [isFocused]);
+
+  return (
+    <Animated.View style={{ flex: 1, opacity }}>
+      {children}
+    </Animated.View>
+  );
+}
 
 function FloatingTabBar({ state, navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -129,27 +151,29 @@ function MainApp() {
         sceneContainerStyle={{ backgroundColor: 'transparent' }}
       >
         <Tab.Screen name="Home">
-          {() => <DashboardScreen colors={COLORS} sessionActive={session.isActive} />}
+          {() => <FadeScreen><DashboardScreen colors={COLORS} sessionActive={session.isActive} /></FadeScreen>}
         </Tab.Screen>
         <Tab.Screen name="History">
-          {() => <HistoryScreen colors={COLORS} />}
+          {() => <FadeScreen><HistoryScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
         <Tab.Screen name="Profile">
-          {() => <ProfileScreen colors={COLORS} />}
+          {() => <FadeScreen><ProfileScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
         <Tab.Screen name="Session">
           {() => (
-            <SessionScreen
-              session={session}
-              onStart={startSession}
-              onEnd={endSession}
-              onUpdate={updateSession}
-              colors={COLORS}
-            />
+            <FadeScreen>
+              <SessionScreen
+                session={session}
+                onStart={startSession}
+                onEnd={endSession}
+                onUpdate={updateSession}
+                colors={COLORS}
+              />
+            </FadeScreen>
           )}
         </Tab.Screen>
         <Tab.Screen name="Coach">
-          {() => <CoachScreen colors={COLORS} />}
+          {() => <FadeScreen><CoachScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
