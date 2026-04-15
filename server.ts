@@ -6,7 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { GoogleGenAI, Type } from "@google/genai";
 import OpenAI from "openai";
-import { verifyToken } from "@clerk/backend";
+import { verifyToken, createClerkClient } from "@clerk/backend";
 
 dotenv.config();
 
@@ -185,6 +185,29 @@ async function dbGetExercisesByWorkout(id: string) {
     return data || [];
   }
   return sqlite!.prepare("SELECT * FROM exercises WHERE workout_id = ?").all(id);
+}
+
+async function dbDeleteAllUserData(userId: string) {
+  if (USE_SUPABASE && supabase) {
+    // Get all workout IDs for the user
+    const { data: workouts } = await supabase.from("workouts").select("id").eq("user_id", userId);
+    const workoutIds = (workouts || []).map((w: any) => w.id);
+    // Delete exercises for those workouts
+    if (workoutIds.length > 0) {
+      const { error: eErr } = await supabase.from("exercises").delete().in("workout_id", workoutIds);
+      if (eErr) throw eErr;
+    }
+    // Delete all workouts
+    const { error: wErr } = await supabase.from("workouts").delete().eq("user_id", userId);
+    if (wErr) throw wErr;
+    return;
+  }
+  // SQLite — exercises cascade from workouts FK, but delete explicitly to be safe
+  const workoutIds = (sqlite!.prepare("SELECT id FROM workouts WHERE user_id = ?").all(userId) as any[]).map(r => r.id);
+  if (workoutIds.length > 0) {
+    sqlite!.prepare(`DELETE FROM exercises WHERE workout_id IN (${workoutIds.map(() => '?').join(',')})`).run(...workoutIds);
+  }
+  sqlite!.prepare("DELETE FROM workouts WHERE user_id = ?").run(userId);
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -494,6 +517,23 @@ RULES:
     } catch (error: any) {
       console.error("Coach error:", error);
       res.status(500).json({ error: error.message || "Coach failed" });
+    }
+  });
+
+  // ── Account deletion (App Store requirement 5.1.1(v)) ───────────────────────
+  app.delete("/api/account", requireAuth, async (req: any, res) => {
+    try {
+      // 1. Delete all workout data
+      await dbDeleteAllUserData(req.userId);
+
+      // 2. Delete user from Clerk
+      const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY! });
+      await clerk.users.deleteUser(req.userId);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Account deletion error:", error);
+      res.status(500).json({ error: error.message || "Failed to delete account" });
     }
   });
 
