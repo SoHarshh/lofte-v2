@@ -28,7 +28,6 @@ interface Props {
 }
 
 export default function SessionScreen({ session, onStart, onEnd, onUpdate, colors }: Props) {
-  const [isProcessing, setIsProcessing] = useState(false);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualExercise, setManualExercise] = useState('');
   const [manualWeight, setManualWeight] = useState(0);
@@ -397,7 +396,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   };
 
   // --- Finish ---
-  const handleFinish = async () => {
+  const handleFinish = () => {
     const stillParsing = session.transcript.some(e => e.pending);
     const hasExercises = session.exercises.length > 0;
 
@@ -418,13 +417,20 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       return;
     }
 
-    setIsProcessing(true);
-    try {
-      const token = await getToken();
+    // Instantly show review sheet — no processing
+    setShowReview(true);
+  };
+
+  const handleSave = () => {
+    setShowReview(false);
+    onEnd();
+    navigation.navigate('Home' as never);
+
+    // Save in background — user doesn't wait
+    getToken().then(token => {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      await fetch(`${API_BASE}/api/workouts`, {
+      fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -432,23 +438,12 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           notes: session.notes,
           exercises: session.exercises,
         }),
-      });
-
-      onEnd();
-      navigation.navigate('Home' as never);
-    } catch (err: any) {
-      Alert.alert('Failed to save workout', err?.message ?? 'Try again.');
-    } finally {
-      setIsProcessing(false);
-    }
+      }).catch(() => {});
+    });
   };
 
-  const handleDone = () => {
+  const handleDiscard = () => {
     setShowReview(false);
-    setPRs([]);
-    setAiDebrief(null);
-    onEnd();
-    navigation.navigate('Home' as never);
   };
 
   const formatExStats = (ex: Exercise): string => {
@@ -781,17 +776,8 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
         onClose={() => setShowExercisePicker(false)}
       />
 
-      {/* Processing overlay */}
-      {isProcessing && (
-        <View style={s.overlay}>
-          <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
-          <ActivityIndicator size="large" color="rgba(255,255,255,0.90)" />
-          <Text style={s.overlayText}>Processing…</Text>
-        </View>
-      )}
-
       {/* Review Modal */}
-      <Modal visible={showReview} transparent animationType="slide" onRequestClose={handleDone}>
+      <Modal visible={showReview} transparent animationType="slide" onRequestClose={handleDiscard}>
         <View style={s.modalBg}>
           <View style={[s.sheet, { paddingBottom: insets.bottom + 16 }]}>
             <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
@@ -846,14 +832,11 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
             </ScrollView>
 
             {/* Action buttons */}
-            <TouchableOpacity style={s.saveBtn} onPress={handleDone} activeOpacity={0.85}>
+            <TouchableOpacity style={s.saveBtn} onPress={handleSave} activeOpacity={0.85}>
               <Text style={s.saveBtnText}>Save Session</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={s.discardBtn}
-              onPress={() => { setShowReview(false); onEnd(); navigation.navigate('Home' as never); }}
-            >
-              <Text style={s.discardBtnText}>Discard</Text>
+            <TouchableOpacity style={s.discardBtn} onPress={handleDiscard}>
+              <Text style={s.discardBtnText}>Keep Logging</Text>
             </TouchableOpacity>
           </View>
         </View>
