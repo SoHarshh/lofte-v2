@@ -40,6 +40,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const [isRecording, setIsRecording] = useState(false);
   const recordingActiveRef = useRef(false);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
+  const [manualNotes, setManualNotes] = useState('');
   const [tick, setTick] = useState(0);
   const [lastPerformance, setLastPerformance] = useState<Record<string, any>>({});
   const transcriptRef = useRef<ScrollView>(null);
@@ -57,6 +58,21 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     const id = setInterval(() => setTick(t => t + 1), 1000);
     return () => clearInterval(id);
   }, [session.isActive]);
+
+  // Fetch last performance when exercise is selected
+  useEffect(() => {
+    if (!manualExercise) return;
+    const key = manualExercise.toLowerCase();
+    if (lastPerformance[key] !== undefined) return;
+    getToken().then(token => {
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      return fetch(`${API_BASE}/api/exercises/last?name=${encodeURIComponent(manualExercise)}`, { headers });
+    })
+      .then(r => r.json())
+      .then(last => setLastPerformance(prev => ({ ...prev, [key]: last })))
+      .catch(() => setLastPerformance(prev => ({ ...prev, [key]: null })));
+  }, [manualExercise]);
 
   const getElapsed = (): number =>
     session.startTime ? Math.floor((Date.now() - new Date(session.startTime).getTime()) / 1000) : 0;
@@ -189,6 +205,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       sets: 1,
       reps: manualReps || 0,
       weight: manualWeight || 0,
+      notes: manualNotes.trim() || undefined,
     };
 
     if (editingEntryId) {
@@ -201,8 +218,31 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       setEditingEntryId(null);
       setShowManualEntry(false);
     } else {
-      addToTranscript('text', exercise.name, [exercise]);
+      if (!session.isActive) onStart();
+      const current = sessionRef.current;
+      const lastEntry = current.transcript[current.transcript.length - 1];
+      const shouldMerge = lastEntry &&
+        !lastEntry.pending &&
+        lastEntry.method === 'text' &&
+        lastEntry.exercises?.length &&
+        lastEntry.exercises[0].name.toLowerCase() === exercise.name.toLowerCase();
+
+      if (shouldMerge) {
+        // Merge into existing entry
+        const updatedTranscript = current.transcript.map(e =>
+          e.id === lastEntry.id
+            ? { ...e, exercises: [...(e.exercises || []), exercise] }
+            : e
+        );
+        onUpdate({
+          transcript: updatedTranscript,
+          exercises: [...current.exercises, exercise],
+        });
+      } else {
+        addToTranscript('text', exercise.name, [exercise]);
+      }
       setManualReps(0);
+      setManualNotes('');
     }
   };
 
@@ -213,6 +253,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     setManualExercise(ex.name);
     setManualWeight(ex.weight ?? 0);
     setManualReps(ex.reps ?? 0);
+    setManualNotes(ex.notes ?? '');
     setEditingEntryId(entryId);
     setShowManualEntry(true);
   };
@@ -222,6 +263,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     setManualExercise('');
     setManualWeight(0);
     setManualReps(0);
+    setManualNotes('');
     setShowManualEntry(false);
   };
 
@@ -382,7 +424,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (token) headers['Authorization'] = `Bearer ${token}`;
 
-      const res = await fetch(`${API_BASE}/api/workouts`, {
+      await fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -391,21 +433,9 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           exercises: session.exercises,
         }),
       });
-      const result = await res.json();
-      setPRs(result.prs || []);
 
-      // AI debrief (non-critical)
-      try {
-        const debriefRes = await fetch(`${API_BASE}/api/workouts/${result.workoutId}/summary`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ prs: result.prs || [] }),
-        });
-        const debrief = await debriefRes.json();
-        setAiDebrief(debrief.summary || null);
-      } catch { /* non-critical */ }
-
-      setShowReview(true);
+      onEnd();
+      navigation.navigate('Home' as never);
     } catch (err: any) {
       Alert.alert('Failed to save workout', err?.message ?? 'Try again.');
     } finally {
@@ -527,18 +557,20 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
           </View>
         )}
 
-        {/* Voice UI area */}
-        <View style={s.voiceArea}>
-          <Text style={s.voicePrompt}>
-            {isRecording ? 'Listening...' : 'Hold mic to log your sets'}
-          </Text>
-        </View>
+        {/* Voice UI area — only show when no exercises logged */}
+        {session.transcript.length === 0 && (
+          <View style={s.voiceArea}>
+            <Text style={s.voicePrompt}>
+              {isRecording ? 'Listening...' : 'Hold mic to log your sets'}
+            </Text>
+          </View>
+        )}
 
-        {/* Transcript scroll */}
+        {/* Transcript scroll — fills available space */}
         {session.transcript.length > 0 && (
           <ScrollView
             ref={transcriptRef}
-            style={s.transcriptScroll}
+            style={s.transcriptScrollFull}
             contentContainerStyle={s.transcriptContent}
             showsVerticalScrollIndicator={false}
           >
@@ -554,12 +586,26 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                       <ActivityIndicator size="small" color="rgba(255,255,255,0.50)" />
                       <Text style={s.entryPending}>{entry.raw}</Text>
                     </View>
+                  ) : (entry.exercises?.length ?? 0) > 1 &&
+                    entry.exercises!.every(e => e.name.toLowerCase() === entry.exercises![0].name.toLowerCase()) ? (
+                    /* Grouped sets — tree structure */
+                    <>
+                      <Text style={s.entryName}>{entry.exercises![0].name}</Text>
+                      {entry.exercises!.map((ex, i) => (
+                        <View key={i} style={s.setRow}>
+                          <Text style={s.setLabel}>Set {i + 1}</Text>
+                          <Text style={s.setStats}>{formatExStats(ex)}</Text>
+                          {ex.notes ? <Text style={s.setNotes}>{ex.notes}</Text> : null}
+                        </View>
+                      ))}
+                    </>
                   ) : (
                     <>
                       {entry.exercises?.map((ex, i) => (
                         <View key={i} style={i > 0 ? { marginTop: 6 } : {}}>
                           <Text style={s.entryName}>{ex.name}</Text>
                           <Text style={s.entryStats}>{formatExStats(ex)}</Text>
+                          {ex.notes ? <Text style={s.setNotes}>{ex.notes}</Text> : null}
                         </View>
                       ))}
                       {entry.method === 'voice' && entry.raw && entry.raw !== 'Voice log' && (
@@ -600,6 +646,12 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
               </Text>
               <Ionicons name="chevron-down" size={16} color="rgba(255,255,255,0.35)" />
             </TouchableOpacity>
+            {/* Previous performance hint */}
+            {manualExercise && lastPerformance[manualExercise.toLowerCase()]?.weight != null && (
+              <Text style={s.lastPerfHint}>
+                Last: {lastPerformance[manualExercise.toLowerCase()].reps} reps @ {lastPerformance[manualExercise.toLowerCase()].weight} lbs
+              </Text>
+            )}
             <View style={s.manualDivider} />
 
             {/* Weight + Reps */}
@@ -662,6 +714,16 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                 </View>
               </View>
             </View>
+
+            {/* Notes */}
+            <TextInput
+              style={s.notesInput}
+              placeholder="Notes (optional)"
+              placeholderTextColor="rgba(255,255,255,0.22)"
+              value={manualNotes}
+              onChangeText={setManualNotes}
+              selectionColor="rgba(255,255,255,0.5)"
+            />
 
             {/* Log Set / Update button */}
             <TouchableOpacity
@@ -876,6 +938,10 @@ const s = StyleSheet.create({
     maxHeight: SCREEN_H * 0.30,
     marginHorizontal: 16,
   },
+  transcriptScrollFull: {
+    flex: 1,
+    marginHorizontal: 16,
+  },
   transcriptContent: { paddingVertical: 4 },
   entry: {
     flexDirection: 'row', alignItems: 'flex-start',
@@ -895,6 +961,16 @@ const s = StyleSheet.create({
   entryRaw: { fontSize: 11, color: 'rgba(255,255,255,0.30)', marginTop: 4, fontStyle: 'italic' },
   entryPending: { fontSize: 13, color: 'rgba(255,255,255,0.40)', fontStyle: 'italic' },
   entryTime: { fontSize: 11, color: 'rgba(255,255,255,0.28)', marginTop: 2, zIndex: 1 },
+  setRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginTop: 6, paddingLeft: 4,
+  },
+  setLabel: {
+    fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.35)',
+    width: 38,
+  },
+  setStats: { fontSize: 13, color: 'rgba(255,255,255,0.60)' },
+  setNotes: { fontSize: 11, color: 'rgba(255,255,255,0.30)', fontStyle: 'italic', marginTop: 2, paddingLeft: 4 },
 
   // Manual entry panel
   manualPanel: {
@@ -912,6 +988,10 @@ const s = StyleSheet.create({
   },
   exercisePickerPlaceholder: {
     color: 'rgba(255,255,255,0.28)',
+  },
+  lastPerfHint: {
+    fontSize: 12, color: 'rgba(255,255,255,0.35)',
+    paddingBottom: 8, zIndex: 1,
   },
   manualDivider: {
     height: 1, backgroundColor: 'rgba(255,255,255,0.10)', marginBottom: 16,
@@ -938,6 +1018,13 @@ const s = StyleSheet.create({
   stepperValue: {
     flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '600',
     color: '#fff', paddingVertical: 0,
+  },
+  notesInput: {
+    fontSize: 13, color: '#fff',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+    marginBottom: 12, zIndex: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
   logSetBtn: {
     backgroundColor: '#fff', borderRadius: 16,

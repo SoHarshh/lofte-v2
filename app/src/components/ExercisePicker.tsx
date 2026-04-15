@@ -104,6 +104,7 @@ export function ExercisePicker({ visible, onSelect, onClose }: Props) {
             data={filtered}
             keyExtractor={item => item.name}
             style={s.list}
+            contentContainerStyle={{ paddingBottom: 24 }}
             keyboardShouldPersistTaps="handled"
             renderItem={({ item }) => (
               <TouchableOpacity style={s.row} onPress={() => handleSelect(item.name)} activeOpacity={0.7}>
@@ -147,7 +148,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     overflow: 'hidden',
-    maxHeight: '82%',
+    maxHeight: '90%',
   },
   handle: {
     width: 36, height: 4, borderRadius: 2,

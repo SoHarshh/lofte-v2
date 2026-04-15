@@ -45,11 +45,12 @@ if (USE_SUPABASE) {
     );
   `);
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch {}
+  try { sqlite.exec("ALTER TABLE exercises ADD COLUMN notes TEXT"); } catch {}
   console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
 }
 
 function mapExercise(ex: any) {
-  return { ...ex, muscleGroup: ex.muscle_group ?? ex.muscleGroup };
+  return { ...ex, muscleGroup: ex.muscle_group ?? ex.muscleGroup, notes: ex.notes ?? undefined };
 }
 
 // ─── Auth middleware ───────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ async function dbSaveWorkout(userId: string, date: string, notes: string, exerci
           workout_id: workout.id, name: ex.name, muscle_group: ex.muscleGroup || null,
           sets: ex.sets ?? null, reps: ex.reps ?? null, weight: ex.weight ?? null,
           distance: ex.distance ?? null, duration: ex.duration ?? null,
-          calories: ex.calories ?? null, pace: ex.pace ?? null,
+          calories: ex.calories ?? null, pace: ex.pace ?? null, notes: ex.notes ?? null,
         }))
       );
       if (eErr) throw eErr;
@@ -131,7 +132,7 @@ async function dbSaveWorkout(userId: string, date: string, notes: string, exerci
   }
   const insertWorkout = sqlite!.prepare("INSERT INTO workouts (date, notes, user_id) VALUES (?, ?, ?)");
   const insertEx = sqlite!.prepare(
-    "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO exercises (workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   );
   let workoutId: any;
   sqlite!.transaction(() => {
@@ -139,7 +140,7 @@ async function dbSaveWorkout(userId: string, date: string, notes: string, exerci
     workoutId = info.lastInsertRowid;
     for (const ex of exercises) {
       insertEx.run(workoutId, ex.name, ex.muscleGroup || null, ex.sets ?? null, ex.reps ?? null,
-        ex.weight ?? null, ex.distance ?? null, ex.duration ?? null, ex.calories ?? null, ex.pace ?? null);
+        ex.weight ?? null, ex.distance ?? null, ex.duration ?? null, ex.calories ?? null, ex.pace ?? null, ex.notes ?? null);
     }
   })();
   return { workoutId, priorBests };

@@ -10,6 +10,7 @@ export interface Exercise {
   duration?: number;
   calories?: number;
   pace?: string;
+  notes?: string;
 }
 
 export interface Workout {
