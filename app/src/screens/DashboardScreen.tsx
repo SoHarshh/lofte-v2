@@ -149,25 +149,31 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
         {/* Two-column glass cards */}
         <View style={styles.cardRow}>
           {/* Last Workout */}
-          <GlassCard style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>LAST WORKOUT</Text>
-            {lastWorkout ? (
-              <>
-                {lastWorkout.exercises.slice(0, 2).map((ex, i) => (
-                  <View key={i} style={[styles.exRow, i === 0 && { marginTop: 10 }]}>
-                    <View style={[styles.exDot, i > 0 && { backgroundColor: 'rgba(255,255,255,0.40)' }]} />
-                    <Text style={styles.exName} numberOfLines={1}>{ex.name}</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('History' as never)}
+            activeOpacity={0.85}
+            style={{ flex: 1 }}
+          >
+            <GlassCard style={{ flex: 1 }}>
+              <Text style={styles.cardLabel}>LAST WORKOUT</Text>
+              {lastWorkout ? (
+                <>
+                  {lastWorkout.exercises.slice(0, 2).map((ex, i) => (
+                    <View key={i} style={[styles.exRow, i === 0 && { marginTop: 10 }]}>
+                      <View style={[styles.exDot, i > 0 && { backgroundColor: 'rgba(255,255,255,0.40)' }]} />
+                      <Text style={styles.exName} numberOfLines={1}>{ex.name}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.cardFooter}>
+                    <Text style={styles.footerLabel}>Total</Text>
+                    <Text style={styles.footerValue}>{formatVol(sessionVolume(lastWorkout))} lbs</Text>
                   </View>
-                ))}
-                <View style={styles.cardFooter}>
-                  <Text style={styles.footerLabel}>Total</Text>
-                  <Text style={styles.footerValue}>{formatVol(sessionVolume(lastWorkout))} lbs</Text>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.cardEmpty}>No sessions yet.{'\n'}Start your first workout.</Text>
-            )}
-          </GlassCard>
+                </>
+              ) : (
+                <Text style={styles.cardEmpty}>No sessions yet.{'\n'}Start your first workout.</Text>
+              )}
+            </GlassCard>
+          </TouchableOpacity>
 
           {/* Coach Insight */}
           <TouchableOpacity
