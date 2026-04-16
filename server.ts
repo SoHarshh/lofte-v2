@@ -668,9 +668,9 @@ RULES:
       dbSaveNyxMessage(req.userId, 'user', userText).catch(() => {});
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-2.5-flash",
         contents,
-        config: { systemInstruction },
+        config: { systemInstruction, thinkingConfig: { thinkingBudget: 0 } },
       });
 
       const reply = response.text.trim();
