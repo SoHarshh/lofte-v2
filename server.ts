@@ -274,7 +274,20 @@ async function startServer() {
     "you",
     "bye",
     "...",
+    "ご視聴ありがとうございました",
+    "ありがとうございます",
+    "字幕は自動生成されています",
+    "おやすみなさい",
   ]);
+
+  function isWhisperHallucination(text: string): boolean {
+    const cleaned = text.toLowerCase().replace(/[!.,。、！]+$/g, '').trim();
+    if (WHISPER_HALLUCINATIONS.has(cleaned)) return true;
+    // Short garbage output (under 4 real words, no exercise-related content)
+    const words = cleaned.split(/\s+/);
+    if (words.length <= 2 && !/\d/.test(cleaned)) return true;
+    return false;
+  }
 
   // Health check
   app.get("/health", (_req, res) => res.json({ ok: true }));
@@ -294,7 +307,7 @@ async function startServer() {
           model: "whisper-1",
         });
         transcript = (whisperResult.text || "").trim();
-        if (!transcript || WHISPER_HALLUCINATIONS.has(transcript.toLowerCase().replace(/[!.,]+$/g, '').trim())) {
+        if (!transcript || isWhisperHallucination(transcript)) {
           return res.json({ exercises: [], transcript: "" });
         }
       } else if (text) {
@@ -507,7 +520,7 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       const text = (result.text || "").trim();
 
       // Filter Whisper hallucinations on silent audio
-      if (!text || WHISPER_HALLUCINATIONS.has(text.toLowerCase().replace(/[!.,]+$/g, '').trim())) {
+      if (!text || isWhisperHallucination(text)) {
         return res.json({ text: "" });
       }
       res.json({ text });
