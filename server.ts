@@ -664,24 +664,27 @@ RULES:
       if (userParts.length === 0) userParts.push({ text: "What do you see in this image?" });
       contents.push({ role: 'user', parts: userParts });
 
-      // Save user message (non-blocking — don't slow down response)
-      dbSaveNyxMessage(req.userId, 'user', userText).catch(() => {});
+      // Save user message — must complete before next request loads history
+      await dbSaveNyxMessage(req.userId, 'user', userText).catch(() => {});
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
         contents,
-        config: { systemInstruction, thinkingConfig: { thinkingBudget: 0 } },
+        config: { systemInstruction },
       });
 
-      const reply = response.text.trim();
+      const reply = (response.text || '').trim();
+      if (!reply) {
+        return res.json({ reply: "Give me a bit more detail and I'll help you out." });
+      }
 
-      // Save coach reply (non-blocking)
-      dbSaveNyxMessage(req.userId, 'model', reply).catch(() => {});
+      // Save coach reply
+      await dbSaveNyxMessage(req.userId, 'model', reply).catch(() => {});
 
       res.json({ reply });
     } catch (error: any) {
-      console.error("Coach error:", error);
-      res.status(500).json({ error: error.message || "Coach failed" });
+      console.error("Coach error:", error?.message || error);
+      res.status(500).json({ error: "Coach temporarily unavailable. Try again." });
     }
   });
 
