@@ -27,9 +27,9 @@ interface Message {
 interface Props { colors: Record<string, string>; }
 
 const STARTERS = [
+  "Plan my next workout",
   "How's my training looking?",
-  "What should I hit next session?",
-  "Am I overtraining anything?",
+  "Help me set my goals",
 ];
 
 export default function CoachScreen({ colors }: Props) {
