@@ -205,6 +205,25 @@ export default function CoachScreen({ colors }: Props) {
     ]);
   };
 
+  // ── Render formatted text (handles **bold**) ──
+  const renderFormattedText = (text: string, isUser: boolean) => {
+    const parts = text.split(/(\*\*[^*]+\*\*)/g);
+    return (
+      <Text style={[s.bubbleText, isUser && s.bubbleTextUser]}>
+        {parts.map((part, i) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return (
+              <Text key={i} style={s.boldText}>
+                {part.slice(2, -2)}
+              </Text>
+            );
+          }
+          return part;
+        })}
+      </Text>
+    );
+  };
+
   // ── Render ──
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.role === 'user';
@@ -223,7 +242,7 @@ export default function CoachScreen({ colors }: Props) {
               resizeMode="cover"
             />
           )}
-          <Text style={[s.bubbleText, isUser && s.bubbleTextUser]}>{item.text}</Text>
+          {renderFormattedText(item.text, isUser)}
         </View>
       </View>
     );
@@ -435,6 +454,7 @@ const s = StyleSheet.create({
   },
   bubbleText: { fontSize: 15, color: 'rgba(255,255,255,0.60)', lineHeight: 22 },
   bubbleTextUser: { color: '#fff' },
+  boldText: { fontWeight: '700', color: '#fff' },
   bubbleImage: { width: 180, height: 140, borderRadius: 12, marginBottom: 8 },
   typingBubble: { paddingVertical: 12, paddingHorizontal: 16 },
 
