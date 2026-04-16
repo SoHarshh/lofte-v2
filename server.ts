@@ -289,6 +289,45 @@ async function startServer() {
     return false;
   }
 
+  // ── MET values for calorie estimation ────────────────────────────────────────
+  const MET_BY_GROUP: Record<string, number> = {
+    chest: 6.0, back: 6.0, shoulders: 5.5, legs: 6.0,
+    quads: 6.0, hamstrings: 6.0, glutes: 6.0,
+    arms: 3.5, biceps: 3.5, triceps: 3.5, calves: 3.5,
+    core: 3.8, cardio: 7.0, other: 4.0,
+  };
+  const MET_BY_EXERCISE: Record<string, number> = {
+    deadlift: 6.5, squat: 6.0, 'bench press': 5.5,
+    'pull up': 8.0, 'chin up': 8.0, 'push up': 8.0,
+    'barbell row': 6.0, 'overhead press': 5.5,
+    running: 9.8, cycling: 7.5, rowing: 7.0, swimming: 8.0,
+    'jump rope': 12.3, 'stair climber': 9.0, elliptical: 5.0,
+    walking: 3.5, treadmill: 8.0,
+  };
+
+  function calculateCalories(exercises: any[], durationMinutes: number, bodyWeightKg: number): any[] {
+    const cappedDuration = Math.min(durationMinutes, 180);
+    const perExMinutes = exercises.length > 0 ? cappedDuration / exercises.length : 0;
+
+    return exercises.map(ex => {
+      // Skip if calories already set (e.g. from camera-parsed gym machine)
+      if (ex.calories && ex.calories > 0) return ex;
+
+      const name = (ex.name || '').toLowerCase();
+      const group = (ex.muscleGroup || ex.muscle_group || 'other').toLowerCase();
+
+      // Look up MET: exercise-specific first, then muscle group
+      const met = MET_BY_EXERCISE[name] ?? MET_BY_GROUP[group] ?? 4.0;
+
+      // Use exercise-specific duration for cardio, otherwise split evenly
+      const exDurationMin = (ex.duration && ex.duration > 0) ? ex.duration / 60 : perExMinutes;
+      const durationHours = exDurationMin / 60;
+
+      const cal = Math.round(met * bodyWeightKg * durationHours);
+      return { ...ex, calories: cal };
+    });
+  }
+
   // Health check
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -415,11 +454,16 @@ Only return { "exercises": [] } if the input contains absolutely no reference to
   });
 
   app.post("/api/workouts", requireAuth, async (req: any, res) => {
-    const { date, notes, exercises } = req.body;
+    const { date, notes, exercises, bodyWeightKg } = req.body;
     try {
-      const { workoutId, priorBests } = await dbSaveWorkout(req.userId, date, notes, exercises);
+      // Calculate calories from MET values
+      const sessionMs = Date.now() - new Date(date).getTime();
+      const durationMin = Math.max(Math.floor(sessionMs / 60000), 10); // min 10 minutes
+      const enriched = calculateCalories(exercises, durationMin, bodyWeightKg || 70);
+
+      const { workoutId, priorBests } = await dbSaveWorkout(req.userId, date, notes, enriched);
       const prMap: Record<string, any> = {};
-      for (const ex of exercises) {
+      for (const ex of enriched) {
         if (!ex.weight) continue;
         const key = ex.name.toLowerCase();
         const prior = priorBests[key];

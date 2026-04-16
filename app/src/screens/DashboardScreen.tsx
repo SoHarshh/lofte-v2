@@ -83,6 +83,12 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   const weekSessions = thisWeekWorkouts.length;
   const weekVolume = thisWeekWorkouts.reduce((a, w) => a + sessionVolume(w), 0);
 
+  // Calories burned today
+  const todayKey = now.toISOString().slice(0, 10);
+  const todayCalories = workouts
+    .filter(w => w.date.slice(0, 10) === todayKey)
+    .reduce((a, w) => a + w.exercises.reduce((b, e) => b + (e.calories || 0), 0), 0);
+
   const last7 = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now);
     d.setDate(now.getDate() - (6 - i));
@@ -126,10 +132,10 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
 
         {/* Score circles */}
         <View style={styles.scoreRow}>
-          <ScoreCircle icon="barbell-outline" value={String(weekSessions)} label="Sessions" />
+          <ScoreCircle icon="barbell-outline" value={String(weekSessions)} label="Sessions" onPress={() => navigation.navigate('Calendar' as never)} />
           <ScoreCircle icon="flash-outline" value={formatVol(weekVolume)} label="Volume" />
           <ScoreCircle icon="flame-outline" value={String(streak)} label="Streak" />
-          <ScoreCircle icon="sync-outline" value="—" label="Recovery" />
+          <ScoreCircle icon="flame" value={todayCalories > 0 ? formatVol(todayCalories) : '0'} label="Calories" onPress={() => navigation.navigate('CalorieDetail' as never)} />
         </View>
 
         {/* Circular Start Workout CTA */}
@@ -253,19 +259,21 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   );
 }
 
-function ScoreCircle({ icon, value, label }: {
+function ScoreCircle({ icon, value, label, onPress }: {
   icon: keyof typeof Ionicons.glyphMap;
   value: string;
   label: string;
+  onPress?: () => void;
 }) {
+  const Wrap = onPress ? TouchableOpacity : View;
   return (
-    <View style={styles.scoreItem}>
+    <Wrap style={styles.scoreItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.scoreCircle}>
         <Ionicons name={icon} size={13} color="rgba(255,255,255,0.50)" />
         <Text style={styles.scoreValue}>{value}</Text>
       </View>
       <Text style={styles.scoreLabel}>{label}</Text>
-    </View>
+    </Wrap>
   );
 }
 

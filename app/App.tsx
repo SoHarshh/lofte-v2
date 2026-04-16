@@ -15,6 +15,8 @@ import HistoryScreen from './src/screens/HistoryScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SessionScreen from './src/screens/SessionScreen';
 import CoachScreen from './src/screens/CoachScreen';
+import CalorieDetailScreen from './src/screens/CalorieDetailScreen';
+import CalendarScreen from './src/screens/CalendarScreen';
 import LoginScreen from './src/screens/LoginScreen';
 
 const CLERK_KEY =
@@ -72,7 +74,7 @@ function FloatingTabBar({ state, navigation }: any) {
   const currentRoute = state.routes[state.index]?.name;
 
   // Hide tab bar on full-screen Session and Coach screens
-  if (currentRoute === 'Session' || currentRoute === 'Coach') return null;
+  if (currentRoute === 'Session' || currentRoute === 'Coach' || currentRoute === 'CalorieDetail' || currentRoute === 'Calendar') return null;
 
   const mainTabs = [
     { name: 'Home', activeIcon: 'home' as const, inactiveIcon: 'home-outline' as const },
@@ -174,6 +176,12 @@ function MainApp() {
         </Tab.Screen>
         <Tab.Screen name="Coach">
           {() => <FadeScreen><CoachScreen colors={COLORS} /></FadeScreen>}
+        </Tab.Screen>
+        <Tab.Screen name="CalorieDetail">
+          {() => <FadeScreen><CalorieDetailScreen colors={COLORS} /></FadeScreen>}
+        </Tab.Screen>
+        <Tab.Screen name="Calendar">
+          {() => <FadeScreen><CalendarScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>
