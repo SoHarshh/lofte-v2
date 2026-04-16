@@ -46,6 +46,15 @@ if (USE_SUPABASE) {
   `);
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch {}
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN notes TEXT"); } catch {}
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS nyx_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+  `);
   console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
 }
 
@@ -188,17 +197,51 @@ async function dbGetExercisesByWorkout(id: string) {
   return sqlite!.prepare("SELECT * FROM exercises WHERE workout_id = ?").all(id);
 }
 
-async function dbDeleteAllUserData(userId: string) {
+// ─── Nyx chat history ────────────────────────────────────────────────────────
+
+async function dbSaveNyxMessage(userId: string, role: string, content: string) {
   if (USE_SUPABASE && supabase) {
-    // Get all workout IDs for the user
+    const { error } = await supabase.from("nyx_messages").insert({ user_id: userId, role, content });
+    if (error) throw error;
+    return;
+  }
+  sqlite!.prepare("INSERT INTO nyx_messages (user_id, role, content) VALUES (?, ?, ?)").run(userId, role, content);
+}
+
+async function dbGetNyxHistory(userId: string, limit = 30): Promise<{ role: string; content: string }[]> {
+  if (USE_SUPABASE && supabase) {
+    const { data } = await supabase.from("nyx_messages")
+      .select("role, content")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    return (data || []).reverse();
+  }
+  return (sqlite!.prepare(
+    "SELECT role, content FROM nyx_messages WHERE user_id = ? ORDER BY created_at DESC LIMIT ?"
+  ).all(userId, limit) as any[]).reverse();
+}
+
+async function dbDeleteNyxHistory(userId: string) {
+  if (USE_SUPABASE && supabase) {
+    const { error } = await supabase.from("nyx_messages").delete().eq("user_id", userId);
+    if (error) throw error;
+    return;
+  }
+  sqlite!.prepare("DELETE FROM nyx_messages WHERE user_id = ?").run(userId);
+}
+
+async function dbDeleteAllUserData(userId: string) {
+  // Delete Nyx chat history
+  await dbDeleteNyxHistory(userId);
+
+  if (USE_SUPABASE && supabase) {
     const { data: workouts } = await supabase.from("workouts").select("id").eq("user_id", userId);
     const workoutIds = (workouts || []).map((w: any) => w.id);
-    // Delete exercises for those workouts
     if (workoutIds.length > 0) {
       const { error: eErr } = await supabase.from("exercises").delete().in("workout_id", workoutIds);
       if (eErr) throw eErr;
     }
-    // Delete all workouts
     const { error: wErr } = await supabase.from("workouts").delete().eq("user_id", userId);
     if (wErr) throw wErr;
     return;
@@ -437,20 +480,54 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
     }
   });
 
-  // ── LOFTE Coach ──────────────────────────────────────────────────────────────
+  // ── Voice transcription (Whisper only — no parsing) ─────────────────────────
+  app.post("/api/ai/transcribe", async (req, res) => {
+    const { audioBase64, mimeType } = req.body;
+    if (!audioBase64) return res.status(400).json({ error: "audioBase64 is required" });
+    try {
+      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const buf = Buffer.from(audioBase64, "base64");
+      const file = new File([buf], "recording.m4a", { type: mimeType || "audio/m4a" });
+      const result = await openai.audio.transcriptions.create({ file, model: "whisper-1" });
+      res.json({ text: result.text || "" });
+    } catch (error: any) {
+      console.error("Transcribe error:", error);
+      res.status(500).json({ error: error.message || "Transcription failed" });
+    }
+  });
+
+  // ── Clear Nyx history ───────────────────────────────────────────────────────
+  app.delete("/api/coach/history", requireAuth, async (req: any, res) => {
+    try {
+      await dbDeleteNyxHistory(req.userId);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Failed to clear history" });
+    }
+  });
+
+  // ── LOFTE Coach (Nyx) ──────────────────────────────────────────────────────
   app.post("/api/ai/coach", requireAuth, async (req: any, res) => {
-    const { message, chatHistory = [] } = req.body;
-    if (!message) return res.status(400).json({ error: "message is required" });
+    const { message, imageBase64 } = req.body;
+    if (!message && !imageBase64) return res.status(400).json({ error: "message or image is required" });
 
     try {
       const allWorkouts = await dbGetWorkouts(req.userId);
 
-      // Last 90 days
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - 90);
-      const recentWorkouts = allWorkouts.filter((w: any) => new Date(w.date) >= cutoff);
+      // ── Compute athlete context ──
+      const now = new Date();
+      const cutoff90 = new Date(); cutoff90.setDate(now.getDate() - 90);
+      const cutoff30 = new Date(); cutoff30.setDate(now.getDate() - 30);
+      const startOfWeek = new Date(now);
+      const dow = now.getDay();
+      startOfWeek.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+      startOfWeek.setHours(0, 0, 0, 0);
 
-      // All-time PRs per exercise
+      const recent90 = allWorkouts.filter((w: any) => new Date(w.date) >= cutoff90);
+      const recent30 = allWorkouts.filter((w: any) => new Date(w.date) >= cutoff30);
+      const thisWeek = allWorkouts.filter((w: any) => new Date(w.date) >= startOfWeek);
+
+      // All-time PRs
       const prBests: Record<string, number> = {};
       allWorkouts.forEach((w: any) => w.exercises.forEach((e: any) => {
         if (!e.weight) return;
@@ -461,52 +538,115 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       // Streak
       const trainedDays = new Set(allWorkouts.map((w: any) => w.date.slice(0, 10)));
       let streak = 0;
-      const streakDate = new Date();
-      while (true) {
-        const key = streakDate.toISOString().slice(0, 10);
-        if (trainedDays.has(key)) { streak++; streakDate.setDate(streakDate.getDate() - 1); }
-        else break;
-      }
+      const sd = new Date();
+      while (trainedDays.has(sd.toISOString().slice(0, 10))) { streak++; sd.setDate(sd.getDate() - 1); }
 
-      // Recent sessions (last 10)
-      const recentLines = recentWorkouts.slice(0, 10).map((w: any) => {
+      // Days since last workout
+      const daysSinceLast = allWorkouts.length > 0
+        ? Math.floor((now.getTime() - new Date(allWorkouts[0].date).getTime()) / 86_400_000)
+        : null;
+
+      // Muscle group frequency (last 30 days)
+      const muscleFreq: Record<string, number> = {};
+      recent30.forEach((w: any) => w.exercises.forEach((e: any) => {
+        const mg = (e.muscle_group || e.muscleGroup || 'Other').toLowerCase();
+        muscleFreq[mg] = (muscleFreq[mg] || 0) + 1;
+      }));
+      const muscleLines = Object.entries(muscleFreq)
+        .sort((a, b) => b[1] - a[1])
+        .map(([mg, count]) => `${mg}: ${count} exercises`)
+        .join(', ') || 'No data';
+
+      // Weekly volume (last 4 weeks)
+      const weeklyVol: number[] = [];
+      for (let w = 0; w < 4; w++) {
+        const wStart = new Date(now); wStart.setDate(now.getDate() - (7 * (w + 1)) - (dow === 0 ? 6 : dow - 1));
+        const wEnd = new Date(wStart); wEnd.setDate(wStart.getDate() + 7);
+        const vol = allWorkouts
+          .filter((wk: any) => { const d = new Date(wk.date); return d >= wStart && d < wEnd; })
+          .reduce((a: number, wk: any) => a + wk.exercises.reduce((b: number, e: any) =>
+            b + ((e.sets || 0) * (e.reps || 0) * (e.weight || 0)), 0), 0);
+        weeklyVol.push(vol);
+      }
+      const volTrend = weeklyVol.reverse().map((v, i) => `W${i + 1}: ${v > 0 ? Math.round(v).toLocaleString() : '0'} lbs`).join(' → ');
+
+      // Recent sessions (last 15, detailed)
+      const recentLines = recent90.slice(0, 15).map((w: any) => {
         const exLines = w.exercises.map((e: any) => {
           if (e.weight) return `${e.name}: ${e.sets}x${e.reps} @ ${e.weight}lbs`;
-          if (e.distance) return `${e.name}: ${(e.distance / 1000).toFixed(1)}km`;
+          if (e.distance) return `${e.name}: ${(e.distance / 1000).toFixed(1)}km in ${Math.round((e.duration || 0) / 60)}min`;
           return e.name;
         }).join(', ');
-        return `${w.date.slice(0, 10)}: ${exLines || 'no exercises recorded'}`;
+        return `${w.date.slice(0, 10)}: ${exLines || 'no exercises'}`;
       }).join('\n');
 
       const prLines = Object.entries(prBests)
         .map(([name, weight]) => `${name}: ${weight}lbs`)
         .join(', ') || 'None yet';
 
-      const systemInstruction = `You are Nyx, an elite personal training AI built into the LOFTE app. You have full access to this athlete's training data.
+      const isNewUser = allWorkouts.length === 0;
 
-ATHLETE DATA (last 90 days):
-- Sessions: ${recentWorkouts.length}
+      const systemInstruction = `You are Nyx — a personal training coach inside the LOFTE fitness app. You are not a chatbot. You are this athlete's coach. Act like it.
+
+WHO YOU ARE:
+- You are Nyx. You're sharp, experienced, and you genuinely care about this person's progress.
+- Talk like a real coach talks — conversational, direct, sometimes blunt, always supportive.
+- You remember everything from past conversations (your chat history is provided). Reference previous discussions naturally: "Last time you mentioned wanting to hit 225 on bench — how's that going?"
+- Never introduce yourself or explain what you can do unless this is the very first conversation (no chat history exists). If there IS history, just pick up where you left off naturally.
+
+HOW YOU COACH:
+- When someone tells you their goals, DIG IN. Ask what specifically they want, their timeline, their experience level, any injuries. A real coach doesn't just say "cool" and give a generic plan.
+- When building a workout plan, make it SPECIFIC: exercise names, sets, reps, rest times, intensity cues. Not vague recommendations.
+- When analyzing their training data, be honest. If they're skipping legs, say it. If volume is dropping, call it out. If they're crushing it, hype them up.
+- When they ask "what should I do today" — look at their recent sessions, find what's missing or due, and give them a concrete session plan.
+- Adjust your advice based on what you learn about them over time. If they told you they have a bad shoulder, remember that and don't program overhead press.
+- For nutrition questions, give practical advice tied to their goals. Don't just say "eat protein" — give them numbers and meal ideas.
+
+CONVERSATION STYLE:
+- Default to 2-4 sentences. Go longer ONLY when giving a workout plan, detailed breakdown, or when they ask for depth.
+- Plain text only. No markdown, no bullet points, no headers, no emojis unless they use them first.
+- Ask follow-up questions when you need more info. Don't guess — coaches ask questions.
+- Match their energy. If they're hyped, match it. If they're frustrated, acknowledge it first.
+
+${isNewUser ? `FIRST CONVERSATION (NEW USER):
+This athlete has no workout data yet. Welcome them like a new client walking into your gym. Be warm but not cheesy. Ask them: what are they training for? What's their experience level? Any injuries or limitations? This helps you coach them even before they log their first session. You can help with programming, form, splits, and general training questions right now.` : `THIS ATHLETE'S DATA:
+- Total sessions logged: ${allWorkouts.length}
+- Last 90 days: ${recent90.length} sessions
+- This week: ${thisWeek.length} sessions
 - Current streak: ${streak} day${streak !== 1 ? 's' : ''}
+- Days since last workout: ${daysSinceLast ?? 'N/A'}
 - All-time PRs: ${prLines}
+- Muscle group frequency (30 days): ${muscleLines}
+- Volume trend (4 weeks): ${volTrend}
 
-RECENT WORKOUTS:
-${recentLines || 'No workouts logged yet.'}
+RECENT SESSIONS:
+${recentLines || 'None in last 90 days.'}`}
 
-RULES:
-- Be direct and specific. Reference their actual numbers.
-- Keep responses concise — 2-4 sentences unless they ask for a breakdown.
-- Never be generic. If data is insufficient, say so honestly.
-- Plain English only, no markdown or bullet points unless explicitly asked.
-- You are encouraging but honest. Don't sugarcoat plateaus.
-- Your name is Nyx. If asked, you are the athlete's personal training AI inside LOFTE.`;
+BOUNDARIES:
+- You only coach on fitness, training, exercise, recovery, nutrition, and sports performance.
+- If asked something completely unrelated (coding, homework, general knowledge), just say: "Not my area — I'm your training coach. What's going on with your workouts?"
+- If they send an image: analyze exercise form, gym equipment screens, food photos, or physique progress. Give specific, actionable feedback.
+- Never make up data you don't have. If you don't know something about their training, ask.`;
 
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-      const contents: any[] = (chatHistory as any[]).map((msg: any) => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }],
+      // Load persistent history from DB (last 30 messages)
+      const history = await dbGetNyxHistory(req.userId, 30);
+      const contents: any[] = history.map((m: any) => ({
+        role: m.role,
+        parts: [{ text: m.content }],
       }));
-      contents.push({ role: 'user', parts: [{ text: message }] });
+
+      // Build user message parts (text + optional image)
+      const userText = message || '(sent an image)';
+      const userParts: any[] = [];
+      if (message) userParts.push({ text: message });
+      if (imageBase64) userParts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64 } });
+      if (userParts.length === 0) userParts.push({ text: "What do you see in this image?" });
+      contents.push({ role: 'user', parts: userParts });
+
+      // Save user message to DB
+      await dbSaveNyxMessage(req.userId, 'user', userText);
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
@@ -514,7 +654,12 @@ RULES:
         config: { systemInstruction },
       });
 
-      res.json({ reply: response.text.trim() });
+      const reply = response.text.trim();
+
+      // Save coach reply to DB
+      await dbSaveNyxMessage(req.userId, 'model', reply);
+
+      res.json({ reply });
     } catch (error: any) {
       console.error("Coach error:", error);
       res.status(500).json({ error: error.message || "Coach failed" });
