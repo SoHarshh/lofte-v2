@@ -152,6 +152,7 @@ export default function HistoryScreen({ colors }: Props) {
         {filtered.map(workout => {
           const vol = sessionVolume(workout);
           const tag = getMuscleTag(workout);
+          const cal = workout.exercises.reduce((a, e) => a + (e.calories || 0), 0);
           const isOpen = expanded === workout.id;
           const d = new Date(workout.date);
           const dayNum = d.getDate();
@@ -183,6 +184,11 @@ export default function HistoryScreen({ colors }: Props) {
                       <View style={s.tag}>
                         <Text style={s.tagText}>{exCount} ex</Text>
                       </View>
+                      {cal > 0 && (
+                        <View style={s.tag}>
+                          <Text style={s.tagText}>{Math.round(cal)} cal</Text>
+                        </View>
+                      )}
                     </View>
                   </View>
 

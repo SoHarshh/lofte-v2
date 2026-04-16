@@ -83,6 +83,12 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   const weekSessions = thisWeekWorkouts.length;
   const weekVolume = thisWeekWorkouts.reduce((a, w) => a + sessionVolume(w), 0);
 
+  // Calories burned today
+  const todayKey = now.toISOString().slice(0, 10);
+  const todayCalories = workouts
+    .filter(w => w.date.slice(0, 10) === todayKey)
+    .reduce((a, w) => a + w.exercises.reduce((b, e) => b + (e.calories || 0), 0), 0);
+
   const last7 = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(now);
     d.setDate(now.getDate() - (6 - i));
@@ -126,10 +132,10 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
 
         {/* Score circles */}
         <View style={styles.scoreRow}>
-          <ScoreCircle icon="barbell-outline" value={String(weekSessions)} label="Sessions" />
+          <ScoreCircle icon="barbell-outline" value={String(weekSessions)} label="Sessions" onPress={() => navigation.navigate('Calendar' as never)} />
           <ScoreCircle icon="flash-outline" value={formatVol(weekVolume)} label="Volume" />
           <ScoreCircle icon="flame-outline" value={String(streak)} label="Streak" />
-          <ScoreCircle icon="sync-outline" value="—" label="Recovery" />
+          <ScoreCircle icon="flame" value={todayCalories > 0 ? formatVol(todayCalories) : '0'} label="Calories" onPress={() => navigation.navigate('CalorieDetail' as never)} />
         </View>
 
         {/* Circular Start Workout CTA */}
@@ -149,25 +155,31 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
         {/* Two-column glass cards */}
         <View style={styles.cardRow}>
           {/* Last Workout */}
-          <GlassCard style={{ flex: 1 }}>
-            <Text style={styles.cardLabel}>LAST WORKOUT</Text>
-            {lastWorkout ? (
-              <>
-                {lastWorkout.exercises.slice(0, 2).map((ex, i) => (
-                  <View key={i} style={[styles.exRow, i === 0 && { marginTop: 10 }]}>
-                    <View style={[styles.exDot, i > 0 && { backgroundColor: 'rgba(255,255,255,0.40)' }]} />
-                    <Text style={styles.exName} numberOfLines={1}>{ex.name}</Text>
+          <TouchableOpacity
+            onPress={() => navigation.navigate('History' as never)}
+            activeOpacity={0.85}
+            style={{ flex: 1 }}
+          >
+            <GlassCard style={{ flex: 1 }}>
+              <Text style={styles.cardLabel}>LAST WORKOUT</Text>
+              {lastWorkout ? (
+                <>
+                  {lastWorkout.exercises.slice(0, 2).map((ex, i) => (
+                    <View key={i} style={[styles.exRow, i === 0 && { marginTop: 10 }]}>
+                      <View style={[styles.exDot, i > 0 && { backgroundColor: 'rgba(255,255,255,0.40)' }]} />
+                      <Text style={styles.exName} numberOfLines={1}>{ex.name}</Text>
+                    </View>
+                  ))}
+                  <View style={styles.cardFooter}>
+                    <Text style={styles.footerLabel}>Total</Text>
+                    <Text style={styles.footerValue}>{formatVol(sessionVolume(lastWorkout))} lbs</Text>
                   </View>
-                ))}
-                <View style={styles.cardFooter}>
-                  <Text style={styles.footerLabel}>Total</Text>
-                  <Text style={styles.footerValue}>{formatVol(sessionVolume(lastWorkout))} lbs</Text>
-                </View>
-              </>
-            ) : (
-              <Text style={styles.cardEmpty}>No sessions yet.{'\n'}Start your first workout.</Text>
-            )}
-          </GlassCard>
+                </>
+              ) : (
+                <Text style={styles.cardEmpty}>No sessions yet.{'\n'}Start your first workout.</Text>
+              )}
+            </GlassCard>
+          </TouchableOpacity>
 
           {/* Coach Insight */}
           <TouchableOpacity
@@ -247,19 +259,21 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   );
 }
 
-function ScoreCircle({ icon, value, label }: {
+function ScoreCircle({ icon, value, label, onPress }: {
   icon: keyof typeof Ionicons.glyphMap;
   value: string;
   label: string;
+  onPress?: () => void;
 }) {
+  const Wrap = onPress ? TouchableOpacity : View;
   return (
-    <View style={styles.scoreItem}>
+    <Wrap style={styles.scoreItem} onPress={onPress} activeOpacity={0.7}>
       <View style={styles.scoreCircle}>
         <Ionicons name={icon} size={13} color="rgba(255,255,255,0.50)" />
         <Text style={styles.scoreValue}>{value}</Text>
       </View>
       <Text style={styles.scoreLabel}>{label}</Text>
-    </View>
+    </Wrap>
   );
 }
 

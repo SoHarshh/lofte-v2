@@ -2,11 +2,13 @@ import React, { useCallback, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, Platform, Image, Switch,
+  Modal, Alert,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import { useUser, useAuth } from '@clerk/expo';
 import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
@@ -50,6 +52,8 @@ export default function ProfileScreen({ colors }: Props) {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [useKg, setUseKg] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const insets = useSafeAreaInsets();
   const { user } = useUser();
   const { signOut } = useAuth();
@@ -76,6 +80,22 @@ export default function ProfileScreen({ colors }: Props) {
   }, [authFetch]);
 
   useFocusEffect(load);
+
+  const handleDeleteAccount = async () => {
+    setDeleting(true);
+    try {
+      const res = await authFetch(`${API_BASE}/api/account`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete account');
+      setDeleteModalVisible(false);
+      // Small delay so modal dismisses before sign-out clears the screen
+      setTimeout(() => signOut(), 300);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not delete account. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const TAB_BAR_H = 80 + Math.max(insets.bottom, 8);
 
@@ -173,15 +193,90 @@ export default function ProfileScreen({ colors }: Props) {
           ))}
         </GlassCard>
 
-        {/* Sign out */}
-        <TouchableOpacity style={s.signOutBtn} onPress={() => signOut()} activeOpacity={0.7}>
-          <Ionicons name="log-out-outline" size={16} color="rgba(255,255,255,0.45)" />
-          <Text style={s.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
+        {/* Account */}
+        <Text style={[s.sectionTitle, { marginTop: 24 }]}>Account</Text>
+        <GlassCard padding={0} style={s.settingsCard}>
+          <TouchableOpacity
+            style={s.settingsRow}
+            onPress={() => signOut()}
+            activeOpacity={0.7}
+          >
+            <View style={s.settingsIconWrap}>
+              <Ionicons name="log-out-outline" size={18} color="rgba(255,255,255,0.55)" />
+            </View>
+            <Text style={[s.settingsLabel, { flex: 1 }]}>Sign Out</Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.25)" />
+          </TouchableOpacity>
+          <View style={s.settingsRowBorder} />
+          <TouchableOpacity
+            style={s.settingsRow}
+            onPress={() => setDeleteModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <View style={[s.settingsIconWrap, { backgroundColor: 'rgba(239,68,68,0.12)', borderColor: 'rgba(239,68,68,0.25)' }]}>
+              <Ionicons name="trash-outline" size={18} color="#EF4444" />
+            </View>
+            <Text style={[s.settingsLabel, { color: '#EF4444', flex: 1 }]}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={16} color="rgba(239,68,68,0.40)" />
+          </TouchableOpacity>
+        </GlassCard>
 
         {/* App version */}
         <Text style={s.version}>LOFTE v1.0 · Built for athletes</Text>
       </ScrollView>
+
+      {/* Delete Account Confirmation */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !deleting && setDeleteModalVisible(false)}
+      >
+        <TouchableOpacity
+          style={s.overlay}
+          activeOpacity={1}
+          onPress={() => !deleting && setDeleteModalVisible(false)}
+        >
+          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+        </TouchableOpacity>
+
+        <View style={s.dialogWrap} pointerEvents="box-none">
+          <View style={s.dialog}>
+            <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+
+            <Text style={[s.dialogTitle, { fontFamily: SERIF }]}>Are you sure?</Text>
+            <Text style={s.dialogMessage}>
+              This will permanently delete your account, workout history, and all associated data. This cannot be undone.
+            </Text>
+
+            <View style={s.dialogDivider} />
+
+            <TouchableOpacity
+              style={s.dialogBtnDelete}
+              onPress={handleDeleteAccount}
+              disabled={deleting}
+              activeOpacity={0.7}
+            >
+              {deleting ? (
+                <ActivityIndicator color="#EF4444" size="small" />
+              ) : (
+                <Text style={s.dialogBtnDeleteText}>Delete Account</Text>
+              )}
+            </TouchableOpacity>
+
+            <View style={s.dialogDivider} />
+
+            <TouchableOpacity
+              style={s.dialogBtnCancel}
+              onPress={() => setDeleteModalVisible(false)}
+              disabled={deleting}
+              activeOpacity={0.7}
+            >
+              <Text style={s.dialogBtnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -259,17 +354,50 @@ const s = StyleSheet.create({
   },
   comingSoonText: { fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.40)', letterSpacing: 1 },
 
-  signOutBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 14, marginTop: 20,
-    borderRadius: 14, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  signOutText: { fontSize: 14, color: 'rgba(255,255,255,0.45)', fontWeight: '500' },
-
   version: {
     textAlign: 'center', fontSize: 11,
-    color: 'rgba(255,255,255,0.20)', marginTop: 16,
+    color: 'rgba(255,255,255,0.20)', marginTop: 20,
     letterSpacing: 0.5,
+  },
+
+  // Delete account dialog
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  dialogWrap: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center', alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  dialog: {
+    width: '100%', borderRadius: 20,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  dialogTitle: {
+    fontSize: 20, fontWeight: '500', color: '#fff',
+    textAlign: 'center', paddingTop: 24, paddingHorizontal: 24,
+    paddingBottom: 8, zIndex: 1,
+  },
+  dialogMessage: {
+    fontSize: 13, color: 'rgba(255,255,255,0.45)',
+    textAlign: 'center', lineHeight: 18,
+    paddingHorizontal: 24, paddingBottom: 20, zIndex: 1,
+  },
+  dialogDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  dialogBtnDelete: {
+    paddingVertical: 16, alignItems: 'center', zIndex: 1,
+  },
+  dialogBtnDeleteText: {
+    fontSize: 17, fontWeight: '600', color: '#EF4444',
+  },
+  dialogBtnCancel: {
+    paddingVertical: 16, alignItems: 'center', zIndex: 1,
+  },
+  dialogBtnCancelText: {
+    fontSize: 17, fontWeight: '400', color: 'rgba(255,255,255,0.70)',
   },
 });

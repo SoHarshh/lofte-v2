@@ -1,93 +1,58 @@
-# LOFTE — Frictionless Workout Tracker
+# LOFTE
 
-Voice-first workout tracking for athletes who refuse to break their flow state. Speak your set, AI logs it instantly.
+**Workout logging that gets out of your way.**
+
+Most gym apps make you stop between sets to tap through logging screens. LOFTE doesn't. Speak a sentence after your set, take a photo of the machine, or type it in — AI structures everything instantly. By the time you leave the gym, your workout is already logged.
 
 Available on **iOS via TestFlight**.
 
 ---
 
-## Features
+## How it works
 
-| Feature | Status |
-|---------|--------|
-| Voice input → AI transcribe + parse → save | ✅ |
-| Text input → AI parse → save | ✅ |
-| Camera / photo → AI Vision analyze → save | ✅ |
-| PR detection (auto-flags personal bests on save) | ✅ |
-| Progressive overload hints (shows last session's numbers) | ✅ |
-| Post-workout AI debrief | ✅ |
-| Workout history with delete | ✅ |
-| Dashboard — volume trends + muscle group breakdown | ✅ |
-| Cardio logging (distance, duration, pace) | ✅ |
-| LOFTE Coach (AI coaching tab) | Coming soon |
+**Three ways to log. All instant.**
+
+- **Voice** — Hit the mic, say "bench press 3 sets of 8 at 185" and keep moving. Whisper transcribes, Gemini structures it.
+- **Camera** — Point at the machine summary screen. AI reads the numbers.
+- **Manual** — Pick from 70+ exercises, enter your sets. No network call, appears immediately.
+
+Every entry shows up as a live card while the session is in progress. Finish the session and your workout is saved, PRs are flagged, and Nyx gives you a debrief.
 
 ---
 
-## Tech Stack
+## Nyx — Your AI Coach
 
-**Mobile App**
-- React Native + Expo SDK 55
-- TypeScript
-- expo-blur (frosted glass UI)
-- expo-audio (voice recording)
-- expo-image-picker (camera / library)
-- React Navigation (bottom tabs)
+Nyx is a personal training AI that actually knows your history. She has access to your last 90 days of workouts, your PRs per exercise, and your training streak.
 
-**Backend**
-- Express + TypeScript (tsx)
-- Google Gemini 2.5 Flash (audio + vision + text parsing)
-- Supabase (Postgres database)
-- Deployed on Railway
+Ask her anything — *"Why has my bench been stuck for 3 weeks?"*, *"What should I focus on next session?"*, *"How's my volume looking?"* — and she'll give you a real answer based on your data, not generic advice.
 
 ---
 
-## Architecture
+## Stack
 
-```
-lofte-v2/
-├── app/                        — React Native / Expo app
-│   ├── src/
-│   │   ├── screens/
-│   │   │   ├── SessionScreen.tsx   — Active workout session
-│   │   │   ├── DashboardScreen.tsx — Analytics + charts
-│   │   │   ├── HistoryScreen.tsx   — Past workouts
-│   │   │   ├── ProfileScreen.tsx   — Stats + settings
-│   │   │   └── CoachScreen.tsx     — AI Coach (coming soon)
-│   │   ├── components/
-│   │   │   ├── AppBackground.tsx   — Global background image
-│   │   │   └── GlassCard.tsx       — Frosted glass card component
-│   │   ├── types/index.ts          — TypeScript interfaces
-│   │   └── config.ts               — API base URL
-│   ├── assets/                 — Icons, splash, background
-│   ├── app.json                — Expo config
-│   └── eas.json                — EAS Build config
-├── server.ts                   — Express API server
-├── .env                        — API keys (not committed)
-└── package.json
-```
+| Layer | What |
+|-------|------|
+| App | React Native + Expo (iOS) |
+| Auth | Clerk — Apple SSO, Google SSO, email/password |
+| Voice | OpenAI Whisper → Gemini 2.5 Flash |
+| Camera | Gemini 2.5 Flash Vision |
+| AI Coach | Gemini 2.5 Flash with workout history context |
+| Backend | Express + TypeScript on Railway |
+| Database | Supabase (Postgres) |
 
 ---
 
 ## Running Locally
 
-**Prerequisites:** Node.js 18+, Expo CLI
-
 ### Backend
 
 ```bash
-# Install dependencies
 npm install
-
-# Create .env
-cp .env.example .env
-# Fill in GEMINI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_KEY
-
-# Start server
-npm run dev
-# Runs on http://localhost:3000
+cp .env.example .env   # fill in keys (see below)
+npm run dev            # http://localhost:3000
 ```
 
-### Mobile App
+### App
 
 ```bash
 cd app
@@ -95,44 +60,40 @@ npm install
 npx expo start
 ```
 
-Scan the QR code with Expo Go, or run on a simulator.
+> Voice recording requires a physical device.
 
-> For voice recording to work, a physical device is required.
+### Environment Variables
+
+```
+GEMINI_API_KEY=       # Google AI Studio
+OPENAI_API_KEY=       # OpenAI (Whisper)
+SUPABASE_URL=         # Supabase project URL
+SUPABASE_SERVICE_KEY= # Supabase service role key
+CLERK_SECRET_KEY=     # Clerk dashboard → API Keys
+```
 
 ---
 
-## Environment Variables
-
-```
-GEMINI_API_KEY=        # Google AI Studio — aistudio.google.com/apikey
-SUPABASE_URL=          # Your Supabase project URL
-SUPABASE_SERVICE_KEY=  # Supabase service role key (secret)
-```
-
-The server falls back to SQLite if Supabase credentials are not set.
-
----
-
-## API Endpoints
+## API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| POST | `/api/ai/parse-workout` | Parse text or audio into exercises |
-| POST | `/api/ai/parse-image` | Parse gym machine photo into exercises |
-| GET | `/api/workouts` | Fetch all workouts |
-| POST | `/api/workouts` | Save a workout, returns PR detections |
+| POST | `/api/ai/parse-workout` | Voice/text → structured exercises |
+| POST | `/api/ai/parse-image` | Photo → structured exercises |
+| GET | `/api/workouts` | Get user's workout history |
+| POST | `/api/workouts` | Save workout + detect PRs |
 | DELETE | `/api/workouts/:id` | Delete a workout |
-| GET | `/api/exercises/last` | Last logged performance for an exercise |
+| GET | `/api/exercises/last` | Last performance for an exercise |
 | GET | `/api/exercises/history` | Full history for an exercise |
-| POST | `/api/workouts/:id/summary` | Generate AI post-workout debrief |
+| POST | `/api/workouts/:id/summary` | Post-workout AI debrief |
+| POST | `/api/ai/coach` | Nyx — AI coach chat |
+
+All workout endpoints require a Clerk JWT (`Authorization: Bearer <token>`).
 
 ---
 
 ## Deployment
 
-**Backend** — Railway
-Auto-deploys from `main` branch. Uses `npm start` → `tsx server.ts`.
-
-**Mobile** — TestFlight (iOS)
-Built with EAS Build (`eas build --platform ios --profile production`), submitted via `eas submit`.
+Backend auto-deploys to Railway on every push to `main`.
+iOS builds via EAS Build, distributed through TestFlight.
