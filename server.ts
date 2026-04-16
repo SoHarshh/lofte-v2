@@ -261,6 +261,21 @@ async function startServer() {
   const PORT = 3000;
   app.use(express.json({ limit: "20mb" }));
 
+  // Known Whisper hallucinations on silent/near-silent audio
+  const WHISPER_HALLUCINATIONS = new Set([
+    "thank you so much for watching",
+    "thank you for watching",
+    "thanks for watching",
+    "thank you",
+    "please subscribe",
+    "please subscribe to my channel",
+    "like and subscribe",
+    "subtitles by the amara.org community",
+    "you",
+    "bye",
+    "...",
+  ]);
+
   // Health check
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
@@ -278,8 +293,8 @@ async function startServer() {
           file: audioFile,
           model: "whisper-1",
         });
-        transcript = whisperResult.text;
-        if (!transcript?.trim()) {
+        transcript = (whisperResult.text || "").trim();
+        if (!transcript || WHISPER_HALLUCINATIONS.has(transcript.toLowerCase().replace(/[!.,]+$/g, '').trim())) {
           return res.json({ exercises: [], transcript: "" });
         }
       } else if (text) {
@@ -489,7 +504,13 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       const buf = Buffer.from(audioBase64, "base64");
       const file = new File([buf], "recording.m4a", { type: mimeType || "audio/m4a" });
       const result = await openai.audio.transcriptions.create({ file, model: "whisper-1" });
-      res.json({ text: result.text || "" });
+      const text = (result.text || "").trim();
+
+      // Filter Whisper hallucinations on silent audio
+      if (!text || WHISPER_HALLUCINATIONS.has(text.toLowerCase().replace(/[!.,]+$/g, '').trim())) {
+        return res.json({ text: "" });
+      }
+      res.json({ text });
     } catch (error: any) {
       console.error("Transcribe error:", error);
       res.status(500).json({ error: error.message || "Transcription failed" });
