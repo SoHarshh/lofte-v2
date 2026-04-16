@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.nilsharsh.lofte",
+      "usesAppleSignIn": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "LOFTE uses the microphone to log workouts by voice.",
         "NSCameraUsageDescription": "LOFTE uses the camera to scan gym machine displays.",
@@ -28,7 +29,8 @@
     "plugins": [
       "expo-audio",
       "expo-image-picker",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-apple-authentication"
     ],
     "extra": {
       "eas": {

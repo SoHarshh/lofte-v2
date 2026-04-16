@@ -4,7 +4,7 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useSSO, useSignIn, useSignUp, useClerk } from '@clerk/expo';
+import { useSSO, useClerk, useAuth } from '@clerk/expo';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,23 +33,76 @@ export default function LoginScreen() {
   const [showNewPassword, setShowNewPassword] = useState(false);
 
   const { startSSOFlow } = useSSO();
-  const { signIn, setActive: setSignInActive } = useSignIn();
-  const { signUp, setActive: setSignUpActive } = useSignUp();
-  const clerk = useClerk() as any;
+  const clerk = useClerk();
+  const { isLoaded: authLoaded } = useAuth();
+
+  // Direct access to the Clerk client — always available once Clerk is loaded.
+  const signIn = clerk?.client?.signIn;
+  const signUp = clerk?.client?.signUp;
+
+  // Activate a session via the top-level Clerk instance so useAuth() refreshes.
+  const activateSession = async (sessionId: string | null | undefined) => {
+    if (!sessionId || !clerk?.setActive) return false;
+    await clerk.setActive({ session: sessionId });
+    return true;
+  };
 
   // --- OAuth ---
   const handleSSO = async (strategy: 'oauth_apple' | 'oauth_google') => {
     try {
       setLoading(true);
-      const { createdSessionId, setActive } = await startSSOFlow({
+      const ssoResult: any = await startSSOFlow({
         strategy,
         redirectUrl: Linking.createURL('/'),
       });
-      if (createdSessionId && setActive) {
-        await setActive({ session: createdSessionId });
+      console.log('[SSO]', strategy, 'result:', JSON.stringify({
+        createdSessionId: ssoResult?.createdSessionId,
+        signUpStatus: ssoResult?.signUp?.status,
+        signInStatus: ssoResult?.signIn?.status,
+      }));
+
+      // Happy path: existing user, session ready
+      if (ssoResult?.createdSessionId) {
+        await activateSession(ssoResult.createdSessionId);
+        return;
       }
+
+      // New user via SSO: complete the signUp
+      const ssoSignUp = ssoResult?.signUp;
+      if (ssoSignUp) {
+        // If Apple didn't return email or other required fields, we can't auto-complete.
+        // Try to finalize — Clerk will auto-fill what it can from the OAuth provider.
+        try {
+          if (ssoSignUp.status === 'missing_requirements') {
+            await ssoSignUp.update({});
+          }
+        } catch (e) {
+          console.log('[SSO] signUp.update failed (ok if not needed):', e);
+        }
+
+        if (ssoSignUp.createdSessionId) {
+          await activateSession(ssoSignUp.createdSessionId);
+          return;
+        }
+        Alert.alert(
+          'Almost there',
+          'Your Apple account needs a bit more info. Try signing up with email, or grant name/email when prompted.'
+        );
+        return;
+      }
+
+      // Existing user needing extra steps
+      const ssoSignIn = ssoResult?.signIn;
+      if (ssoSignIn?.createdSessionId) {
+        await activateSession(ssoSignIn.createdSessionId);
+        return;
+      }
+
+      Alert.alert('Sign in failed', 'No session returned by Apple. Try again.');
     } catch (err: any) {
-      Alert.alert('Sign in failed', err?.errors?.[0]?.message ?? 'Try again.');
+      console.error('[SSO error]', JSON.stringify(err));
+      const msg = err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? 'Try again.';
+      Alert.alert('Sign in failed', msg);
     } finally {
       setLoading(false);
     }
@@ -57,21 +110,28 @@ export default function LoginScreen() {
 
   // --- Email sign in ---
   const handleSignIn = async () => {
-    if (!signIn) return;
+    if (!authLoaded || !signIn) {
+      Alert.alert('Hold on', 'Auth is still loading — try again in a sec.');
+      return;
+    }
     setLoading(true);
     try {
-      // Clear any stale Clerk session before starting a new sign-in
-      try { await clerk.signOut(); } catch {}
-      await signIn.create({ identifier: email });
-      const rawSignIn = clerk?.client?.signIn;
-      await rawSignIn.attemptFirstFactor({ strategy: 'password', password });
-      if (rawSignIn.status === 'complete' && rawSignIn.createdSessionId) {
-        await setSignInActive({ session: rawSignIn.createdSessionId });
-      } else {
-        Alert.alert('Sign in failed', 'Please check your email and password.');
+      const result = await signIn.create({
+        identifier: email.trim().toLowerCase(),
+        password,
+      });
+      console.log('[SignIn] status:', result.status, 'sessionId:', result.createdSessionId);
+      if (result.status === 'complete' && result.createdSessionId) {
+        await activateSession(result.createdSessionId);
+        return;
       }
+      Alert.alert('Sign in failed', `Unexpected status: ${result.status}`);
     } catch (err: any) {
-      Alert.alert('Sign in failed', err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? 'Check your email and password.');
+      console.error('[SignIn error]', JSON.stringify(err));
+      Alert.alert(
+        'Sign in failed',
+        err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? 'Check your email and password.'
+      );
     } finally {
       setLoading(false);
     }
@@ -79,22 +139,32 @@ export default function LoginScreen() {
 
   // --- Email sign up ---
   const handleSignUp = async () => {
-    if (!signUp) return;
+    if (!authLoaded || !signUp) {
+      Alert.alert('Hold on', 'Auth is still loading — try again in a sec.');
+      return;
+    }
     setLoading(true);
     try {
-      try { await clerk.signOut(); } catch {}
-      await signUp.create({ emailAddress: email, password, firstName, lastName });
-      if (signUp.status === 'complete') {
-        await clerk.setActive({ session: signUp.createdSessionId });
-      } else if (signUp.status === 'missing_requirements') {
-        // Email verification required — send code and show verify screen
+      const result = await signUp.create({
+        emailAddress: email.trim().toLowerCase(),
+        password,
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+      });
+      console.log('[SignUp] status:', result.status);
+      if (result.status === 'complete' && result.createdSessionId) {
+        await activateSession(result.createdSessionId);
+        return;
+      }
+      if (result.status === 'missing_requirements') {
         await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
         setMode('verify');
-      } else {
-        Alert.alert('Sign up failed', 'Please check your details and try again.');
+        return;
       }
+      Alert.alert('Sign up failed', `Unexpected status: ${result.status}`);
     } catch (err: any) {
-      const msg = err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? JSON.stringify(err);
+      console.error('[SignUp error]', JSON.stringify(err));
+      const msg = err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? err?.message ?? 'Try again.';
       Alert.alert('Sign up failed', msg);
     } finally {
       setLoading(false);
@@ -103,14 +173,18 @@ export default function LoginScreen() {
 
   // --- Verify email ---
   const handleVerify = async () => {
-    if (!signUp) return;
+    if (!authLoaded || !signUp) return;
     setLoading(true);
     try {
       const result = await signUp.attemptEmailAddressVerification({ code });
-      if (result.status === 'complete') {
-        await setSignUpActive({ session: result.createdSessionId });
+      console.log('[Verify] status:', result.status);
+      if (result.status === 'complete' && result.createdSessionId) {
+        await activateSession(result.createdSessionId);
+        return;
       }
+      Alert.alert('Verification failed', `Unexpected status: ${result.status}`);
     } catch (err: any) {
+      console.error('[Verify error]', JSON.stringify(err));
       Alert.alert('Invalid code', err?.errors?.[0]?.longMessage ?? 'Check the code and try again.');
     } finally {
       setLoading(false);
@@ -119,10 +193,10 @@ export default function LoginScreen() {
 
   // --- Forgot password: send reset code ---
   const handleForgotPassword = async () => {
-    if (!signIn || !email) return;
+    if (!authLoaded || !signIn || !email) return;
     setLoading(true);
     try {
-      await signIn.create({ strategy: 'reset_password_email_code', identifier: email });
+      await signIn.create({ strategy: 'reset_password_email_code', identifier: email.trim().toLowerCase() });
       setCodeSent(true);
     } catch (err: any) {
       Alert.alert('Error', err?.errors?.[0]?.longMessage ?? err?.errors?.[0]?.message ?? 'Could not send reset code.');
@@ -133,18 +207,16 @@ export default function LoginScreen() {
 
   // --- Reset password: verify code + set new password ---
   const handleResetPassword = async () => {
-    if (!signIn) return;
+    if (!authLoaded || !signIn) return;
     setLoading(true);
     try {
-      const rawSignIn = clerk?.client?.signIn;
-      await rawSignIn.attemptFirstFactor({
+      const result = await signIn.attemptFirstFactor({
         strategy: 'reset_password_email_code',
         code: resetCode,
         password: newPassword,
       });
-      const sessionId = rawSignIn.createdSessionId;
-      if (sessionId) {
-        await clerk.setActive({ session: sessionId });
+      if (result.status === 'complete' && result.createdSessionId) {
+        await activateSession(result.createdSessionId);
       } else {
         Alert.alert(
           'Password updated',
