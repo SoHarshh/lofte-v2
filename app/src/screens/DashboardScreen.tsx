@@ -10,6 +10,7 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -59,6 +60,8 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const authFetch = useAuthFetch();
+  const useKg = useUnits();
+  const unit = unitLabel(useKg);
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/api/workouts`)
@@ -172,7 +175,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
                   ))}
                   <View style={styles.cardFooter}>
                     <Text style={styles.footerLabel}>Total</Text>
-                    <Text style={styles.footerValue}>{formatVol(sessionVolume(lastWorkout))} lbs</Text>
+                    <Text style={styles.footerValue}>{formatVol(useKg ? sessionVolume(lastWorkout) * 0.4536 : sessionVolume(lastWorkout))} {unit}</Text>
                   </View>
                 </>
               ) : (
@@ -205,7 +208,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
           <GlassCard style={styles.chartCard}>
             <View style={styles.chartHeader}>
               <Text style={styles.cardLabel}>THIS WEEK</Text>
-              <Text style={styles.chartTotal}>{formatVol(weekVolume)} lbs</Text>
+              <Text style={styles.chartTotal}>{formatVol(useKg ? weekVolume * 0.4536 : weekVolume)} {unit}</Text>
             </View>
             {/* Bars */}
             <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: 72, marginBottom: 8 }}>
