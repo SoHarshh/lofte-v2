@@ -49,17 +49,25 @@ const initialSession: SessionState = {
 
 function FadeScreen({ children }: { children: React.ReactNode }) {
   const isFocused = useIsFocused();
-  const opacity = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(isFocused ? 1 : 0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    if (isFocused) {
-      opacity.setValue(0);
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 220,
-        useNativeDriver: true,
-      }).start();
+    // Stop any in-progress animation to prevent jitter on rapid switches
+    if (animRef.current) {
+      animRef.current.stop();
+      animRef.current = null;
     }
+
+    const anim = Animated.timing(opacity, {
+      toValue: isFocused ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    });
+    animRef.current = anim;
+    anim.start(({ finished }) => {
+      if (finished) animRef.current = null;
+    });
   }, [isFocused]);
 
   return (
