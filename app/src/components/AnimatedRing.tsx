@@ -3,7 +3,8 @@ import { View, Animated, Easing, StyleSheet, Text, Platform } from 'react-native
 import Svg, { Circle } from 'react-native-svg';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_LIGHT } from '../utils/fonts';
+const SYSTEM = FONT_LIGHT;
 
 interface Props {
   size: number;
@@ -70,7 +71,7 @@ export function AnimatedRing({
       </Svg>
       {/* Center text */}
       <View style={styles.center}>
-        <Text style={[styles.label, { fontFamily: SERIF }]}>{label}</Text>
+        <Text style={[styles.label, { fontFamily: SYSTEM }]}>{label}</Text>
         <Text style={styles.sublabel}>{sublabel}</Text>
       </View>
     </View>

@@ -8,6 +8,21 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { Ionicons } from '@expo/vector-icons';
 import { ClerkProvider, useAuth } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
+import { useFonts } from 'expo-font';
+import {
+  Inter_300Light,
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
+import {
+  Fraunces_300Light,
+  Fraunces_400Regular,
+  Fraunces_500Medium,
+  Fraunces_600SemiBold,
+  Fraunces_700Bold,
+} from '@expo-google-fonts/fraunces';
 import { SessionState } from './src/types/index';
 import { AppBackground } from './src/components/AppBackground';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -19,7 +34,6 @@ import CalorieDetailScreen from './src/screens/CalorieDetailScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import BiologyScreen from './src/screens/BiologyScreen';
 import LoginScreen from './src/screens/LoginScreen';
-import { DnaIcon } from './src/components/DnaIcon';
 
 const CLERK_KEY =
   process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
@@ -89,7 +103,7 @@ function FloatingTabBar({ state, navigation }: any) {
   const mainTabs = [
     { name: 'Home', activeIcon: 'home' as const, inactiveIcon: 'home-outline' as const },
     { name: 'History', activeIcon: 'time' as const, inactiveIcon: 'time-outline' as const },
-    { name: 'Biology', custom: 'dna' as const },
+    { name: 'Health', activeIcon: 'pulse' as const, inactiveIcon: 'pulse-outline' as const },
     { name: 'Profile', activeIcon: 'person' as const, inactiveIcon: 'person-outline' as const },
   ];
 
@@ -111,18 +125,11 @@ function FloatingTabBar({ state, navigation }: any) {
               onPress={() => navigation.navigate(tab.name)}
               activeOpacity={0.7}
             >
-              {tab.custom === 'dna' ? (
-                <DnaIcon
-                  size={22}
-                  color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
-                />
-              ) : (
-                <Ionicons
-                  name={isFocused ? tab.activeIcon : tab.inactiveIcon}
-                  size={22}
-                  color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
-                />
-              )}
+              <Ionicons
+                name={isFocused ? tab.activeIcon : tab.inactiveIcon}
+                size={22}
+                color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
+              />
             </TouchableOpacity>
           );
         })}
@@ -144,6 +151,18 @@ function FloatingTabBar({ state, navigation }: any) {
 function MainApp() {
   const [session, setSession] = useState<SessionState>(initialSession);
   const { isSignedIn, isLoaded } = useAuth();
+  const [fontsLoaded] = useFonts({
+    Inter_300Light,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Fraunces_300Light,
+    Fraunces_400Regular,
+    Fraunces_500Medium,
+    Fraunces_600SemiBold,
+    Fraunces_700Bold,
+  });
 
   const startSession = () =>
     setSession({ isActive: true, startTime: new Date().toISOString(), transcript: [], exercises: [], notes: '' });
@@ -151,7 +170,7 @@ function MainApp() {
   const updateSession = (updates: Partial<SessionState>) =>
     setSession(prev => ({ ...prev, ...updates }));
 
-  if (!isLoaded) {
+  if (!isLoaded || !fontsLoaded) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color="#fff" />
@@ -176,7 +195,7 @@ function MainApp() {
         <Tab.Screen name="History">
           {() => <FadeScreen><HistoryScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
-        <Tab.Screen name="Biology">
+        <Tab.Screen name="Health">
           {() => <FadeScreen><BiologyScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
         <Tab.Screen name="Profile">

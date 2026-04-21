@@ -12,7 +12,8 @@ import { Workout, Exercise } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_MEDIUM } from '../utils/fonts';
+const SYSTEM = FONT_MEDIUM;
 
 const FILTERS = ['All', 'This Week', 'This Month', 'Strength', 'Cardio', 'PRs'];
 
@@ -114,10 +115,16 @@ export default function HistoryScreen({ colors }: Props) {
         showsVerticalScrollIndicator={false}
         stickyHeaderIndices={[1]}
       >
-        {/* Header */}
+        {/* Header — centered, matches Health tab */}
         <View style={s.header}>
-          <Text style={[s.title, { fontFamily: SERIF }]}>History</Text>
-          <Text style={s.subtitle}>{workouts.length} session{workouts.length !== 1 ? 's' : ''} logged</Text>
+          <View style={s.headerSide} />
+          <View style={s.headerCenter}>
+            <Text style={s.headerEyebrow}>
+              {workouts.length} SESSION{workouts.length !== 1 ? 'S' : ''}
+            </Text>
+            <Text style={[s.headerTitle, { fontFamily: SYSTEM }]}>History</Text>
+          </View>
+          <View style={s.headerSide} />
         </View>
 
         {/* Sticky filter pills */}
@@ -146,7 +153,7 @@ export default function HistoryScreen({ colors }: Props) {
         {filtered.length === 0 && (
           <View style={s.empty}>
             <Ionicons name="time-outline" size={48} color="rgba(255,255,255,0.08)" />
-            <Text style={[s.emptyTitle, { fontFamily: SERIF }]}>No sessions yet</Text>
+            <Text style={[s.emptyTitle, { fontFamily: SYSTEM }]}>No sessions yet</Text>
             <Text style={s.emptySubtitle}>Your workout history will appear here</Text>
           </View>
         )}
@@ -236,9 +243,23 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   content: { paddingHorizontal: 20 },
 
-  header: { marginBottom: 20 },
-  title: { fontSize: 36, fontWeight: '400', color: '#fff', marginBottom: 4 },
-  subtitle: { fontSize: 14, color: 'rgba(255,255,255,0.45)' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+    marginBottom: 20,
+  },
+  headerSide: { width: 36, height: 36 },
+  headerCenter: { alignItems: 'center' },
+  headerEyebrow: {
+    fontSize: 10, color: 'rgba(255,255,255,0.42)',
+    letterSpacing: 1.7, fontWeight: '600',
+  },
+  headerTitle: {
+    fontSize: 18, fontWeight: '500', color: '#fff',
+    letterSpacing: 1.4, marginTop: 2, textTransform: 'uppercase',
+  },
 
   filterWrap: { paddingBottom: 16, marginHorizontal: -20 },
   filterRow: { paddingHorizontal: 20, gap: 8 },

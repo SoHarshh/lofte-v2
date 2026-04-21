@@ -15,7 +15,8 @@ import { File } from 'expo-file-system';
 import { API_BASE } from '../config';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_MEDIUM } from '../utils/fonts';
+const SYSTEM = FONT_MEDIUM;
 
 interface Message {
   id: string;
@@ -267,7 +268,7 @@ export default function CoachScreen({ colors }: Props) {
         </TouchableOpacity>
         <View style={s.headerCenter}>
           <Ionicons name="sparkles" size={13} color="rgba(255,255,255,0.45)" style={{ marginRight: 5 }} />
-          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>Nyx</Text>
+          <Text style={[s.headerTitle, { fontFamily: SYSTEM }]}>Nyx</Text>
         </View>
         <TouchableOpacity
           style={s.backBtn}
@@ -295,7 +296,7 @@ export default function CoachScreen({ colors }: Props) {
             <View style={s.emptyIcon}>
               <Ionicons name="sparkles" size={30} color="rgba(255,255,255,0.50)" />
             </View>
-            <Text style={[s.emptyTitle, { fontFamily: SERIF }]}>Nyx</Text>
+            <Text style={[s.emptyTitle, { fontFamily: SYSTEM }]}>Nyx</Text>
             <Text style={s.emptySubtitle}>Your personal training AI</Text>
             <View style={s.starterList}>
               {STARTERS.map(q => (
@@ -411,7 +412,7 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   headerCenter: { flexDirection: 'row', alignItems: 'center' },
-  headerTitle: { fontSize: 17, fontWeight: '400', color: '#fff' },
+  headerTitle: { fontSize: 17, fontWeight: '500', color: '#fff', letterSpacing: 1.4, textTransform: 'uppercase' },
 
   listContent: { paddingHorizontal: 16, paddingBottom: 16 },
   listEmpty: { flex: 1, justifyContent: 'center' },

@@ -12,7 +12,8 @@ import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_MEDIUM } from '../utils/fonts';
+const SYSTEM = FONT_MEDIUM;
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -122,7 +123,7 @@ export default function CalendarScreen({ colors }: Props) {
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.70)" />
           </TouchableOpacity>
-          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>Calendar</Text>
+          <Text style={[s.headerTitle, { fontFamily: SYSTEM }]}>Calendar</Text>
           <View style={{ width: 38 }} />
         </View>
 
@@ -131,7 +132,7 @@ export default function CalendarScreen({ colors }: Props) {
           <TouchableOpacity onPress={prevMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
             <Ionicons name="chevron-back" size={20} color="rgba(255,255,255,0.50)" />
           </TouchableOpacity>
-          <Text style={[s.monthTitle, { fontFamily: SERIF }]}>
+          <Text style={[s.monthTitle, { fontFamily: SYSTEM }]}>
             {MONTH_NAMES[month]} {year}
           </Text>
           <TouchableOpacity onPress={nextMonth} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -266,7 +267,7 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
   },
-  headerTitle: { fontSize: 17, fontWeight: '400', color: '#fff' },
+  headerTitle: { fontSize: 17, fontWeight: '500', color: '#fff', letterSpacing: 1.4, textTransform: 'uppercase' },
 
   monthNav: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',

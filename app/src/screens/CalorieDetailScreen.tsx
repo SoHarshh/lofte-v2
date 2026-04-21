@@ -13,7 +13,8 @@ import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_MEDIUM } from '../utils/fonts';
+const SYSTEM = FONT_MEDIUM;
 
 interface Props { colors: Record<string, string>; }
 
@@ -26,6 +27,9 @@ export default function CalorieDetailScreen({ colors }: Props) {
   const [goal, setGoal] = useState(500);
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState('500');
+  const [bodyWeight, setBodyWeight] = useState(70);
+  const [editingWeight, setEditingWeight] = useState(false);
+  const [weightInput, setWeightInput] = useState('70');
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const authFetch = useAuthFetch();
@@ -33,6 +37,9 @@ export default function CalorieDetailScreen({ colors }: Props) {
   useEffect(() => {
     SecureStore.getItemAsync('calorie_goal').then(v => {
       if (v) { setGoal(parseInt(v)); setGoalInput(v); }
+    });
+    SecureStore.getItemAsync('body_weight_kg').then(v => {
+      if (v) { setBodyWeight(parseFloat(v)); setWeightInput(v); }
     });
   }, []);
 
@@ -44,6 +51,14 @@ export default function CalorieDetailScreen({ colors }: Props) {
   }, [authFetch]);
 
   useFocusEffect(load);
+
+  const saveWeight = () => {
+    const val = parseFloat(weightInput) || 70;
+    setBodyWeight(val);
+    setWeightInput(String(val));
+    setEditingWeight(false);
+    SecureStore.setItemAsync('body_weight_kg', String(val));
+  };
 
   const saveGoal = () => {
     const val = parseInt(goalInput) || 500;
@@ -96,7 +111,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
           <TouchableOpacity style={s.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.7}>
             <Ionicons name="chevron-back" size={22} color="rgba(255,255,255,0.70)" />
           </TouchableOpacity>
-          <Text style={[s.headerTitle, { fontFamily: SERIF }]}>Calories</Text>
+          <Text style={[s.headerTitle, { fontFamily: SYSTEM }]}>Calories</Text>
           <View style={{ width: 38 }} />
         </View>
 
@@ -170,6 +185,40 @@ export default function CalorieDetailScreen({ colors }: Props) {
             </View>
           )}
         </GlassCard>
+
+        {/* Body weight */}
+        <Text style={[s.sectionTitle, { marginTop: 20 }]}>Body Weight</Text>
+        <GlassCard padding={0} style={s.settingsCard}>
+          <TouchableOpacity
+            style={s.settingsRow}
+            onPress={() => { setEditingWeight(!editingWeight); setWeightInput(String(bodyWeight)); }}
+            activeOpacity={0.7}
+          >
+            <View style={s.settingsIconWrap}>
+              <Ionicons name="body-outline" size={18} color="rgba(255,255,255,0.55)" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingsLabel}>Your Weight</Text>
+              <Text style={s.settingsSubLabel}>{bodyWeight} kg — used for calorie accuracy</Text>
+            </View>
+            <Ionicons name={editingWeight ? 'chevron-up' : 'chevron-down'} size={16} color="rgba(255,255,255,0.25)" />
+          </TouchableOpacity>
+          {editingWeight && (
+            <View style={s.goalEditRow}>
+              <TextInput
+                style={s.goalInput}
+                value={weightInput}
+                onChangeText={setWeightInput}
+                keyboardType="decimal-pad"
+                selectionColor="rgba(255,255,255,0.5)"
+                autoFocus
+              />
+              <TouchableOpacity style={s.goalSaveBtn} onPress={saveWeight} activeOpacity={0.8}>
+                <Text style={s.goalSaveBtnText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </GlassCard>
       </ScrollView>
     </View>
   );
@@ -189,7 +238,7 @@ const s = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center', justifyContent: 'center',
   },
-  headerTitle: { fontSize: 17, fontWeight: '400', color: '#fff' },
+  headerTitle: { fontSize: 17, fontWeight: '500', color: '#fff', letterSpacing: 1.4, textTransform: 'uppercase' },
 
   ringWrap: { alignItems: 'center', marginBottom: 32 },
 

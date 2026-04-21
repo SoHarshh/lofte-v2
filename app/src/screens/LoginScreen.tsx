@@ -15,7 +15,9 @@ WebBrowser.maybeCompleteAuthSession();
 
 type Mode = 'signin' | 'signup' | 'verify' | 'forgot' | 'reset';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_SEMIBOLD } from '../utils/fonts';
+const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif'; // LOFTE brand wordmark only
+const SYSTEM = FONT_SEMIBOLD;
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
@@ -247,7 +249,7 @@ export default function LoginScreen() {
             <View style={s.iconCircle}>
               <Ionicons name="mail-outline" size={32} color="rgba(255,255,255,0.8)" />
             </View>
-            <Text style={[s.title, { fontFamily: SERIF }]}>Check your email</Text>
+            <Text style={[s.title, { fontFamily: SYSTEM }]}>Check your email</Text>
             <Text style={s.subtitle}>We sent a 6-digit code to {email}</Text>
 
             <View style={s.card}>
@@ -294,7 +296,7 @@ export default function LoginScreen() {
             <View style={s.iconCircle}>
               <Ionicons name="lock-closed-outline" size={32} color="rgba(255,255,255,0.8)" />
             </View>
-            <Text style={[s.title, { fontFamily: SERIF }]}>Reset password</Text>
+            <Text style={[s.title, { fontFamily: SYSTEM }]}>Reset password</Text>
             <Text style={s.subtitle}>
               {codeSent ? `Code sent to ${email}` : "Enter your email and we'll send a reset code"}
             </Text>

@@ -13,7 +13,9 @@ import { useAuthFetch } from '../hooks/useAuthFetch';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
 import { useHealthSync } from '../hooks/useHealthSync';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { HEADING_LIGHT, FONT_SEMIBOLD } from '../utils/fonts';
+// Dashboard "Start Workout" circle and empty-state title are headlines → serif.
+const SYSTEM = HEADING_LIGHT;
 
 interface Props {
   colors: Record<string, string>;
@@ -150,7 +152,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
             onPress={() => navigation.navigate('Session' as never)}
             activeOpacity={0.85}
           >
-            <Text style={[styles.ctaText, { fontFamily: SERIF }]}>
+            <Text style={[styles.ctaText, { fontFamily: SYSTEM }]}>
               {sessionActive ? 'Resume\nWorkout' : 'Start\nWorkout'}
             </Text>
             {sessionActive && <View style={styles.sessionDot} />}
@@ -288,7 +290,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
         {workouts.length === 0 && (
           <View style={styles.empty}>
             <Ionicons name="barbell-outline" size={52} color="rgba(255,255,255,0.08)" />
-            <Text style={[styles.emptyTitle, { fontFamily: SERIF }]}>Ready to train?</Text>
+            <Text style={[styles.emptyTitle, { fontFamily: FONT_SEMIBOLD }]}>Ready to train?</Text>
             <Text style={styles.emptySubtitle}>
               Tap Start Workout above to log your first session
             </Text>

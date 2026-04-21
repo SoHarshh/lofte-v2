@@ -18,6 +18,7 @@ import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
 import { ExercisePicker } from '../components/ExercisePicker';
 import { useUnits, displayWeight, toLbs, unitLabel } from '../utils/units';
+import { FONT_SEMIBOLD } from '../utils/fonts';
 import {
   isHealthAvailable, isHealthConnected,
   saveWorkoutToHealth, getHeartRateForWindow, mapMuscleGroupToActivity,
@@ -914,8 +915,9 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   timerText: {
-    fontFamily: 'Courier', fontSize: 22, fontWeight: '500',
+    fontSize: 22, fontWeight: '500',
     color: '#fff', letterSpacing: 2, zIndex: 1,
+    fontVariant: ['tabular-nums'],
   },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
   activeDot: {
@@ -1114,7 +1116,7 @@ const s = StyleSheet.create({
     alignSelf: 'center', marginBottom: 20,
     zIndex: 1,
   },
-  reviewTitle: { fontSize: 28, fontWeight: '400', color: '#fff', fontFamily: 'Georgia', marginBottom: 4 },
+  reviewTitle: { fontSize: 28, fontWeight: '600', color: '#fff', letterSpacing: -0.4, marginBottom: 4, fontFamily: FONT_SEMIBOLD },
   reviewSub: { fontSize: 13, color: 'rgba(255,255,255,0.45)', marginBottom: 20 },
 
   prBanner: {

@@ -19,7 +19,8 @@ import {
   requestHealthPermissions,
 } from '../utils/health';
 
-const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
+import { FONT_SEMIBOLD } from '../utils/fonts';
+const SYSTEM = FONT_SEMIBOLD;
 
 interface Props { colors: Record<string, string>; }
 
@@ -169,10 +170,10 @@ export default function ProfileScreen({ colors }: Props) {
             <View style={s.avatarHighlight} />
             {avatarUrl
               ? <Image source={{ uri: avatarUrl }} style={StyleSheet.absoluteFillObject} />
-              : <Text style={[s.avatarInitials, { fontFamily: SERIF }]}>{initials}</Text>
+              : <Text style={[s.avatarInitials, { fontFamily: SYSTEM }]}>{initials}</Text>
             }
           </View>
-          <Text style={[s.name, { fontFamily: SERIF }]}>{displayName}</Text>
+          <Text style={[s.name, { fontFamily: SYSTEM }]}>{displayName}</Text>
           <Text style={s.memberLabel}>LOFTE MEMBER</Text>
         </View>
 
@@ -297,7 +298,7 @@ export default function ProfileScreen({ colors }: Props) {
           <View style={s.dialog}>
             <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
 
-            <Text style={[s.dialogTitle, { fontFamily: SERIF }]}>Are you sure?</Text>
+            <Text style={[s.dialogTitle, { fontFamily: SYSTEM }]}>Are you sure?</Text>
             <Text style={s.dialogMessage}>
               This will permanently delete your account, workout history, and all associated data. This cannot be undone.
             </Text>
