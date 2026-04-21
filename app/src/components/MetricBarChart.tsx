@@ -11,6 +11,7 @@ interface Props {
   unit: string;
   colorActive?: string;
   colorIdle?: string;
+  compact?: boolean; // shorter bars + smaller header for tight layouts
 }
 
 const SYSTEM = FONT_LIGHT;
@@ -21,7 +22,10 @@ export function MetricBarChart({
   data, unit,
   colorActive = 'rgba(255,255,255,0.95)',
   colorIdle = 'rgba(255,255,255,0.18)',
+  compact = false,
 }: Props) {
+  const barsMaxHeight = compact ? 90 : 160;
+  const bigNumSize = compact ? 28 : 40;
   const [selected, setSelected] = useState<number>(data.length - 1);
   const values = data.map((d) => d.value);
   const max = Math.max(...values);
@@ -36,11 +40,11 @@ export function MetricBarChart({
   return (
     <View>
       {/* Header: selected label + value + max/min summary */}
-      <View style={s.header}>
+      <View style={[s.header, compact && { marginBottom: 10 }]}>
         <View>
           <Text style={s.caption}>{sel ? sel.label : 'Average'}</Text>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', marginTop: 4 }}>
-            <Text style={[s.bigNum, { fontFamily: SYSTEM }]}>
+            <Text style={[s.bigNum, { fontFamily: SYSTEM, fontSize: bigNumSize }]}>
               {sel ? formatNum(sel.value) : avg.toFixed(1)}
             </Text>
             <Text style={s.unit}> {unit}</Text>
@@ -53,7 +57,7 @@ export function MetricBarChart({
       </View>
 
       {/* Bars */}
-      <View style={s.barsRow}>
+      <View style={[s.barsRow, { height: barsMaxHeight + 16 }]}>
         {data.map((d, i) => {
           const pct = ((d.value - min) / range) * 0.75 + 0.22;
           return (
@@ -68,7 +72,7 @@ export function MetricBarChart({
               colorIdle={colorIdle}
               onPress={() => setSelected(i)}
               index={i}
-              maxHeight={160}
+              maxHeight={barsMaxHeight}
             />
           );
         })}
@@ -165,7 +169,6 @@ const s = StyleSheet.create({
   barsRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    height: 176,
     gap: 6,
   },
   barWrap: {

@@ -16,10 +16,9 @@ import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { useHealthDay } from '../hooks/useHealthDay';
 import { useMetricSeries, Period as SeriesPeriod } from '../hooks/useMetricSeries';
-import { FONT_LIGHT, FONT_MEDIUM, FONT_SEMIBOLD } from '../utils/fonts';
+import { FONT_LIGHT, FONT_MEDIUM } from '../utils/fonts';
 
 interface Props { colors: Record<string, string>; }
-
 type Period = 'W' | 'M' | 'Y';
 
 function workoutCalories(w: Workout): number {
@@ -30,17 +29,11 @@ function workoutCalories(w: Workout): number {
 
 function FadeInUp({ delay = 0, children }: { delay?: number; children: React.ReactNode }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(14)).current;
+  const translateY = useRef(new Animated.Value(12)).current;
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(opacity, {
-        toValue: 1, duration: 520, delay,
-        easing: Easing.out(Easing.cubic), useNativeDriver: true,
-      }),
-      Animated.timing(translateY, {
-        toValue: 0, duration: 520, delay,
-        easing: Easing.out(Easing.cubic), useNativeDriver: true,
-      }),
+      Animated.timing(opacity, { toValue: 1, duration: 480, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 480, delay, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
   }, []);
   return (
@@ -50,17 +43,15 @@ function FadeInUp({ delay = 0, children }: { delay?: number; children: React.Rea
   );
 }
 
-// ─── Animated number counter ────────────────────────────────────────────────
+// ─── Count-up with 48ms throttle ────────────────────────────────────────────
 
 function CountUp({
-  value, style, decimals = 0, suffix = '',
-}: {
-  value: number; style?: any; decimals?: number; suffix?: string;
-}) {
+  value, style, decimals = 0,
+}: { value: number; style?: any; decimals?: number }) {
   const [display, setDisplay] = useState(0);
   useEffect(() => {
     const start = Date.now();
-    const duration = 900;
+    const duration = 800;
     let last = -1;
     let rafId: number | null = null;
     let lastPaint = 0;
@@ -82,7 +73,7 @@ function CountUp({
   }, [value, decimals]);
   return (
     <Text style={style}>
-      {display.toLocaleString('en-US', { maximumFractionDigits: decimals })}{suffix}
+      {display.toLocaleString('en-US', { maximumFractionDigits: decimals })}
     </Text>
   );
 }
@@ -107,12 +98,8 @@ export default function CalorieDetailScreen({ colors }: Props) {
   const series = useMetricSeries('cal', period as SeriesPeriod, today);
 
   useEffect(() => {
-    SecureStore.getItemAsync('calorie_goal').then(v => {
-      if (v) { setGoal(parseInt(v)); setGoalInput(v); }
-    });
-    SecureStore.getItemAsync('body_weight_kg').then(v => {
-      if (v) { setBodyWeight(parseFloat(v)); setWeightInput(v); }
-    });
+    SecureStore.getItemAsync('calorie_goal').then(v => { if (v) { setGoal(parseInt(v)); setGoalInput(v); } });
+    SecureStore.getItemAsync('body_weight_kg').then(v => { if (v) { setBodyWeight(parseFloat(v)); setWeightInput(v); } });
   }, []);
 
   const load = useCallback(() => {
@@ -126,49 +113,43 @@ export default function CalorieDetailScreen({ colors }: Props) {
 
   const saveWeight = () => {
     const val = parseFloat(weightInput) || 70;
-    setBodyWeight(val);
-    setWeightInput(String(val));
-    setEditingWeight(false);
+    setBodyWeight(val); setWeightInput(String(val)); setEditingWeight(false);
     SecureStore.setItemAsync('body_weight_kg', String(val));
   };
-
   const saveGoal = () => {
     const val = parseInt(goalInput) || 500;
-    setGoal(val);
-    setGoalInput(String(val));
-    setEditingGoal(false);
+    setGoal(val); setGoalInput(String(val)); setEditingGoal(false);
     SecureStore.setItemAsync('calorie_goal', String(val));
   };
 
-  // Today's numbers
+  // Today's calories — prefer Apple Health total, fall back to workout-derived
   const todayKey = today.toISOString().slice(0, 10);
-  const workoutCalToday = workouts
+  const workoutCalToday = Math.round(workouts
     .filter(w => w.date.slice(0, 10) === todayKey)
-    .reduce((a, w) => a + workoutCalories(w), 0);
+    .reduce((a, w) => a + workoutCalories(w), 0));
   const healthCalToday = health.summary.activeEnergyKcal;
-  // Prefer Apple Health total (includes everything), fall back to workout-only
-  const displayedToday = healthCalToday ?? Math.round(workoutCalToday);
-  const otherActiveToday = healthCalToday != null ? Math.max(0, healthCalToday - Math.round(workoutCalToday)) : null;
+  const displayedToday = healthCalToday ?? workoutCalToday;
+  const otherToday = healthCalToday != null ? Math.max(0, healthCalToday - workoutCalToday) : null;
 
-  // This week average from real daily range
+  // 7d average from real daily range
   const seriesVals = series.data.map(p => p.value).filter(v => v > 0);
-  const weekAvg = seriesVals.length > 0
+  const avg7 = seriesVals.length > 0
     ? Math.round(seriesVals.reduce((a, b) => a + b, 0) / seriesVals.length)
     : 0;
-
-  // Trend — today vs 7d avg
-  const trendDelta = weekAvg > 0 && displayedToday > 0
-    ? +(((displayedToday - weekAvg) / weekAvg) * 100).toFixed(1)
+  const trendDelta = avg7 > 0 && displayedToday > 0
+    ? +(((displayedToday - avg7) / avg7) * 100).toFixed(1)
     : null;
 
   const progress = goal > 0 ? displayedToday / goal : 0;
-  const isHit = progress >= 1;
-  const goalColor = isHit ? '#10B981' : 'rgba(255,255,255,0.80)';
+  const ringColor = progress >= 1 ? '#10B981' : 'rgba(255,255,255,0.85)';
 
   return (
     <View style={s.root}>
       <ScrollView
-        contentContainerStyle={[s.content, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 32 }]}
+        contentContainerStyle={[
+          s.content,
+          { paddingTop: insets.top + 8, paddingBottom: Math.max(insets.bottom, 12) + 8 },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -186,20 +167,15 @@ export default function CalorieDetailScreen({ colors }: Props) {
           </View>
         </FadeInUp>
 
-        {/* Hero — ring + big number + trend pill */}
+        {/* Hero — compact ring + trend + breakdown inline */}
         <FadeInUp delay={40}>
-          <HealthCard style={{ marginBottom: 12 }} padding={20}>
-            <View style={s.heroLabelRow}>
-              <Ionicons name="flame-outline" size={11} color="rgba(255,255,255,0.50)" />
-              <Text style={s.eyebrow}>ACTIVE CALORIES</Text>
-            </View>
-
-            <View style={s.ringWrap}>
+          <HealthCard style={{ marginBottom: 10 }} padding={14}>
+            <View style={s.heroRow}>
               <RingProgress
                 value={progress}
-                size={210}
-                stroke={13}
-                color={goalColor}
+                size={132}
+                stroke={10}
+                color={ringColor}
                 gradientKey="calRing"
               >
                 <View style={{ alignItems: 'center' }}>
@@ -207,77 +183,48 @@ export default function CalorieDetailScreen({ colors }: Props) {
                     value={displayedToday}
                     style={[s.ringValue, { fontFamily: FONT_LIGHT }]}
                   />
-                  <Text style={s.ringCaption}>of {goal} cal</Text>
+                  <Text style={s.ringCaption}>of {goal}</Text>
                 </View>
               </RingProgress>
+
+              {/* Right-side info stack */}
+              <View style={s.heroInfo}>
+                <Text style={s.heroLabel}>ACTIVE CAL</Text>
+                {trendDelta != null ? (
+                  <View style={[s.trendPill, trendDelta >= 0 ? s.trendPillUp : s.trendPillDown]}>
+                    <Text style={s.trendText}>
+                      {trendDelta >= 0 ? '▲' : '▼'} {Math.abs(trendDelta).toFixed(1)}%
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={s.heroMuted}>Build a 7-day trend</Text>
+                )}
+                <Text style={s.heroMuted}>
+                  {trendDelta != null ? `vs 7-day avg (${avg7})` : ''}
+                </Text>
+
+                {healthCalToday != null && (
+                  <View style={s.miniBreakdown}>
+                    <View style={s.miniRow}>
+                      <Ionicons name="barbell-outline" size={10} color="rgba(255,255,255,0.45)" />
+                      <Text style={s.miniLabel}>Workouts</Text>
+                      <Text style={s.miniValue}>{workoutCalToday}</Text>
+                    </View>
+                    <View style={s.miniRow}>
+                      <Ionicons name="walk-outline" size={10} color="rgba(255,255,255,0.45)" />
+                      <Text style={s.miniLabel}>Other</Text>
+                      <Text style={s.miniValue}>{otherToday ?? 0}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
             </View>
-
-            {trendDelta != null && (
-              <View style={s.trendRow}>
-                <View style={[s.trendPill, trendDelta >= 0 ? s.trendPillUp : s.trendPillDown]}>
-                  <Text style={s.trendText}>
-                    {trendDelta >= 0 ? '▲' : '▼'} {Math.abs(trendDelta).toFixed(1)}%
-                  </Text>
-                </View>
-                <Text style={s.trendCaption}>vs 7-day average</Text>
-              </View>
-            )}
-
-            {/* Workout / Other breakdown when Apple Health connected */}
-            {healthCalToday != null && (
-              <View style={s.breakdownRow}>
-                <View style={s.breakdownBlock}>
-                  <Text style={s.breakdownValue}>
-                    {Math.round(workoutCalToday)}
-                  </Text>
-                  <View style={s.breakdownLabelRow}>
-                    <Ionicons name="barbell-outline" size={10} color="rgba(255,255,255,0.45)" />
-                    <Text style={s.breakdownLabel}>WORKOUTS</Text>
-                  </View>
-                </View>
-                <View style={s.breakdownDivider} />
-                <View style={s.breakdownBlock}>
-                  <Text style={s.breakdownValue}>{otherActiveToday ?? 0}</Text>
-                  <View style={s.breakdownLabelRow}>
-                    <Ionicons name="walk-outline" size={10} color="rgba(255,255,255,0.45)" />
-                    <Text style={s.breakdownLabel}>OTHER</Text>
-                  </View>
-                </View>
-              </View>
-            )}
           </HealthCard>
         </FadeInUp>
 
-        {/* Stats row */}
-        <FadeInUp delay={120}>
-          <View style={s.statsRow}>
-            <HealthCard style={s.statCard} padding={14}>
-              <Text style={s.statEyebrow}>TODAY</Text>
-              <CountUp
-                value={displayedToday}
-                style={[s.statValue, { fontFamily: FONT_LIGHT }]}
-              />
-            </HealthCard>
-            <HealthCard style={s.statCard} padding={14}>
-              <Text style={s.statEyebrow}>DAILY AVG</Text>
-              <CountUp
-                value={weekAvg}
-                style={[s.statValue, { fontFamily: FONT_LIGHT }]}
-              />
-            </HealthCard>
-            <HealthCard style={s.statCard} padding={14}>
-              <Text style={s.statEyebrow}>GOAL</Text>
-              <CountUp
-                value={goal}
-                style={[s.statValue, { fontFamily: FONT_LIGHT }]}
-              />
-            </HealthCard>
-          </View>
-        </FadeInUp>
-
-        {/* Period selector + interactive bar chart */}
-        <FadeInUp delay={200}>
-          <HealthCard style={{ marginBottom: 12 }} padding={20}>
+        {/* Period chart — compact */}
+        <FadeInUp delay={100}>
+          <HealthCard style={{ marginBottom: 10 }} padding={14}>
             <View style={s.periodBar}>
               {(['W', 'M', 'Y'] as Period[]).map((p) => {
                 const active = p === period;
@@ -294,7 +241,6 @@ export default function CalorieDetailScreen({ colors }: Props) {
                 );
               })}
             </View>
-
             <View key={period}>
               {series.loading ? (
                 <View style={s.chartEmpty}>
@@ -305,48 +251,48 @@ export default function CalorieDetailScreen({ colors }: Props) {
                   <Text style={s.chartEmptyText}>No data yet</Text>
                 </View>
               ) : (
-                <MetricBarChart data={series.data} unit="kcal" />
+                <MetricBarChart data={series.data} unit="kcal" compact />
               )}
             </View>
           </HealthCard>
         </FadeInUp>
 
-        {/* Settings */}
-        <FadeInUp delay={280}>
-          <Text style={s.sectionTitle}>Daily Goal</Text>
-          <HealthCard style={{ marginBottom: 16 }} padding={0}>
+        {/* Settings — collapsed by default, tight */}
+        <FadeInUp delay={160}>
+          <HealthCard style={{ marginBottom: 8 }} padding={0}>
             <TouchableOpacity
               style={s.settingsRow}
               onPress={() => { setEditingGoal(!editingGoal); setGoalInput(String(goal)); }}
               activeOpacity={0.7}
             >
               <View style={s.settingsIconWrap}>
-                <Ionicons name="flag-outline" size={18} color="rgba(255,255,255,0.55)" />
+                <Ionicons name="flag-outline" size={16} color="rgba(255,255,255,0.60)" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.settingsLabel}>Calorie Goal</Text>
-                <Text style={s.settingsSubLabel}>{goal} cal per day</Text>
+                <Text style={s.settingsLabel}>Daily Goal</Text>
+                <Text style={s.settingsSubLabel}>{goal} cal / day</Text>
               </View>
-              <Ionicons name={editingGoal ? 'chevron-up' : 'chevron-down'} size={16} color="rgba(255,255,255,0.30)" />
+              <Ionicons name={editingGoal ? 'chevron-up' : 'chevron-down'} size={14} color="rgba(255,255,255,0.30)" />
             </TouchableOpacity>
             {editingGoal && (
-              <View style={s.goalEditRow}>
+              <View style={s.editRow}>
                 <TextInput
-                  style={s.goalInput}
+                  style={s.editInput}
                   value={goalInput}
                   onChangeText={setGoalInput}
                   keyboardType="numeric"
                   selectionColor="rgba(255,255,255,0.5)"
                   autoFocus
                 />
-                <TouchableOpacity style={s.goalSaveBtn} onPress={saveGoal} activeOpacity={0.8}>
-                  <Text style={s.goalSaveBtnText}>Save</Text>
+                <TouchableOpacity style={s.saveBtn} onPress={saveGoal} activeOpacity={0.8}>
+                  <Text style={s.saveBtnText}>Save</Text>
                 </TouchableOpacity>
               </View>
             )}
           </HealthCard>
+        </FadeInUp>
 
-          <Text style={s.sectionTitle}>Body Weight</Text>
+        <FadeInUp delay={220}>
           <HealthCard padding={0}>
             <TouchableOpacity
               style={s.settingsRow}
@@ -354,26 +300,26 @@ export default function CalorieDetailScreen({ colors }: Props) {
               activeOpacity={0.7}
             >
               <View style={s.settingsIconWrap}>
-                <Ionicons name="body-outline" size={18} color="rgba(255,255,255,0.55)" />
+                <Ionicons name="body-outline" size={16} color="rgba(255,255,255,0.60)" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.settingsLabel}>Your Weight</Text>
-                <Text style={s.settingsSubLabel}>{bodyWeight} kg — used for workout calorie accuracy</Text>
+                <Text style={s.settingsLabel}>Body Weight</Text>
+                <Text style={s.settingsSubLabel}>{bodyWeight} kg · calorie accuracy</Text>
               </View>
-              <Ionicons name={editingWeight ? 'chevron-up' : 'chevron-down'} size={16} color="rgba(255,255,255,0.30)" />
+              <Ionicons name={editingWeight ? 'chevron-up' : 'chevron-down'} size={14} color="rgba(255,255,255,0.30)" />
             </TouchableOpacity>
             {editingWeight && (
-              <View style={s.goalEditRow}>
+              <View style={s.editRow}>
                 <TextInput
-                  style={s.goalInput}
+                  style={s.editInput}
                   value={weightInput}
                   onChangeText={setWeightInput}
                   keyboardType="decimal-pad"
                   selectionColor="rgba(255,255,255,0.5)"
                   autoFocus
                 />
-                <TouchableOpacity style={s.goalSaveBtn} onPress={saveWeight} activeOpacity={0.8}>
-                  <Text style={s.goalSaveBtnText}>Save</Text>
+                <TouchableOpacity style={s.saveBtn} onPress={saveWeight} activeOpacity={0.8}>
+                  <Text style={s.saveBtnText}>Save</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -388,11 +334,10 @@ const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: 'transparent' },
   content: { paddingHorizontal: 16 },
 
-  // Header
   header: {
     flexDirection: 'row', alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8, marginBottom: 8,
+    paddingVertical: 6, marginBottom: 6,
   },
   circleBtn: {
     width: 36, height: 36, borderRadius: 18,
@@ -405,135 +350,110 @@ const s = StyleSheet.create({
     letterSpacing: 1.4, textTransform: 'uppercase',
   },
 
-  // Hero
-  heroLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  eyebrow: {
-    fontSize: 10, fontWeight: '600',
-    color: 'rgba(255,255,255,0.50)',
-    letterSpacing: 1.6, textTransform: 'uppercase',
+  // Hero — side-by-side ring + info
+  heroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
-  ringWrap: { alignItems: 'center', marginVertical: 20 },
   ringValue: {
-    fontSize: 54, fontWeight: '300', color: '#fff',
-    letterSpacing: -1.6, lineHeight: 56,
+    fontSize: 34, color: '#fff', fontWeight: '300',
+    letterSpacing: -0.8, lineHeight: 36,
     fontVariant: ['tabular-nums'],
   },
   ringCaption: {
-    fontSize: 11, color: 'rgba(255,255,255,0.45)',
-    marginTop: 2, letterSpacing: 0.3,
+    fontSize: 10, color: 'rgba(255,255,255,0.45)',
+    marginTop: 1, letterSpacing: 0.2,
   },
-
-  trendRow: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 8, alignSelf: 'center', marginTop: 4,
+  heroInfo: { flex: 1, gap: 4 },
+  heroLabel: {
+    fontSize: 10, color: 'rgba(255,255,255,0.50)',
+    letterSpacing: 1.6, fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  heroMuted: {
+    fontSize: 10, color: 'rgba(255,255,255,0.38)',
   },
   trendPill: {
-    paddingHorizontal: 10, paddingVertical: 3,
-    borderRadius: 100,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8, paddingVertical: 2,
+    borderRadius: 100, marginVertical: 2,
   },
   trendPillUp: { backgroundColor: 'rgba(16,185,129,0.14)' },
   trendPillDown: { backgroundColor: 'rgba(255,255,255,0.08)' },
-  trendText: { fontSize: 11, color: 'rgba(255,255,255,0.90)', fontWeight: '600' },
-  trendCaption: { fontSize: 11, color: 'rgba(255,255,255,0.38)' },
+  trendText: { fontSize: 11, color: 'rgba(255,255,255,0.92)', fontWeight: '600' },
 
-  // Breakdown
-  breakdownRow: {
-    flexDirection: 'row',
-    marginTop: 18,
-    paddingTop: 16,
+  miniBreakdown: {
+    marginTop: 8,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.10)',
+    gap: 3,
   },
-  breakdownBlock: { flex: 1, alignItems: 'center', gap: 4 },
-  breakdownDivider: {
-    width: StyleSheet.hairlineWidth,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    marginVertical: 4,
+  miniRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  miniLabel: {
+    fontSize: 11, color: 'rgba(255,255,255,0.55)', flex: 1,
   },
-  breakdownValue: {
-    fontSize: 20, color: '#fff', fontWeight: '400',
-    letterSpacing: -0.3, fontVariant: ['tabular-nums'],
-  },
-  breakdownLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  breakdownLabel: {
-    fontSize: 9, color: 'rgba(255,255,255,0.45)',
-    letterSpacing: 1.4, fontWeight: '600',
-  },
-
-  // Stats row
-  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  statCard: { flex: 1, alignItems: 'center' },
-  statEyebrow: {
-    fontSize: 9, color: 'rgba(255,255,255,0.45)',
-    letterSpacing: 1.4, fontWeight: '600',
-    marginBottom: 6, textTransform: 'uppercase',
-  },
-  statValue: {
-    fontSize: 24, color: '#fff', fontWeight: '300',
-    letterSpacing: -0.4, fontVariant: ['tabular-nums'],
+  miniValue: {
+    fontSize: 11, color: '#fff', fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
 
   // Period pill
   periodBar: {
     flexDirection: 'row', gap: 4,
-    padding: 4, borderRadius: 100,
+    padding: 3, borderRadius: 100,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    marginBottom: 20,
+    marginBottom: 10,
   },
   periodBtn: {
-    flex: 1, paddingVertical: 7,
+    flex: 1, paddingVertical: 6,
     alignItems: 'center', justifyContent: 'center',
     borderRadius: 100,
   },
   periodBtnActive: { backgroundColor: 'rgba(255,255,255,0.14)' },
   periodText: {
-    fontSize: 11, letterSpacing: 1.4,
+    fontSize: 10, letterSpacing: 1.4,
     color: 'rgba(255,255,255,0.40)', fontWeight: '600',
   },
   chartEmpty: {
-    paddingVertical: 56, alignItems: 'center',
+    paddingVertical: 28, alignItems: 'center',
   },
   chartEmptyText: {
-    fontSize: 12, color: 'rgba(255,255,255,0.35)', letterSpacing: 0.3,
+    fontSize: 11, color: 'rgba(255,255,255,0.35)', letterSpacing: 0.3,
   },
 
   // Settings
-  sectionTitle: {
-    fontSize: 10, fontWeight: '600',
-    color: 'rgba(255,255,255,0.45)',
-    letterSpacing: 1.6, textTransform: 'uppercase',
-    marginBottom: 8, marginTop: 4,
-  },
   settingsRow: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 16, gap: 12,
+    paddingHorizontal: 14, paddingVertical: 12, gap: 12,
   },
   settingsIconWrap: {
-    width: 34, height: 34, borderRadius: 10,
+    width: 30, height: 30, borderRadius: 9,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center', justifyContent: 'center',
   },
-  settingsLabel: { fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.85)' },
-  settingsSubLabel: { fontSize: 11, color: 'rgba(255,255,255,0.40)', marginTop: 2 },
-  goalEditRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 16, paddingBottom: 16,
+  settingsLabel: { fontSize: 13, fontWeight: '500', color: 'rgba(255,255,255,0.88)' },
+  settingsSubLabel: { fontSize: 11, color: 'rgba(255,255,255,0.42)', marginTop: 1 },
+  editRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    paddingHorizontal: 14, paddingBottom: 12,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.08)',
-    paddingTop: 12,
   },
-  goalInput: {
-    flex: 1, fontSize: 18, fontWeight: '500', color: '#fff',
+  editInput: {
+    flex: 1, fontSize: 16, fontWeight: '500', color: '#fff',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8,
     backgroundColor: 'rgba(255,255,255,0.05)',
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
-  goalSaveBtn: {
-    backgroundColor: '#fff', borderRadius: 12,
-    paddingHorizontal: 20, paddingVertical: 10,
+  saveBtn: {
+    backgroundColor: '#fff', borderRadius: 10,
+    paddingHorizontal: 18, paddingVertical: 8,
   },
-  goalSaveBtnText: { fontSize: 14, fontWeight: '700', color: '#050B14' },
+  saveBtnText: { fontSize: 13, fontWeight: '700', color: '#050B14' },
 });
