@@ -46,6 +46,8 @@ if (USE_SUPABASE) {
   `);
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch {}
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN notes TEXT"); } catch {}
+  try { sqlite.exec("ALTER TABLE workouts ADD COLUMN avg_hr REAL"); } catch {}
+  try { sqlite.exec("ALTER TABLE workouts ADD COLUMN max_hr REAL"); } catch {}
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS nyx_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,6 +168,18 @@ async function dbSaveWorkout(userId: string, date: string, notes: string, exerci
     }
   })();
   return { workoutId, priorBests };
+}
+
+async function dbUpdateWorkoutHR(id: string, userId: string, avgHr: number | null, maxHr: number | null) {
+  if (USE_SUPABASE && supabase) {
+    const { error } = await (supabase.from("workouts") as any)
+      .update({ avg_hr: avgHr, max_hr: maxHr })
+      .eq("id", id).eq("user_id", userId);
+    if (error) throw error;
+    return;
+  }
+  sqlite!.prepare("UPDATE workouts SET avg_hr = ?, max_hr = ? WHERE id = ? AND user_id = ?")
+    .run(avgHr, maxHr, id, userId);
 }
 
 async function dbDeleteWorkout(id: string, userId: string) {
@@ -573,6 +587,19 @@ Only return { "exercises": [] } if the input contains absolutely no reference to
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to delete workout" });
+    }
+  });
+
+  app.patch("/api/workouts/:id/metrics", requireAuth, async (req: any, res) => {
+    const { avg_hr, max_hr } = req.body as { avg_hr?: number | null; max_hr?: number | null };
+    try {
+      await dbUpdateWorkoutHR(req.params.id, req.userId,
+        typeof avg_hr === 'number' ? avg_hr : null,
+        typeof max_hr === 'number' ? max_hr : null);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Workout metrics update error:", error);
+      res.status(500).json({ error: error.message || "Failed to update workout metrics" });
     }
   });
 

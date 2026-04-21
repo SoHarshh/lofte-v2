@@ -5,6 +5,7 @@ import {
   Platform, Modal, KeyboardAvoidingView,
   Dimensions, Linking,
 } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@clerk/expo';
@@ -17,6 +18,10 @@ import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
 import { ExercisePicker } from '../components/ExercisePicker';
 import { useUnits, displayWeight, toLbs, unitLabel } from '../utils/units';
+import {
+  isHealthAvailable, isHealthConnected,
+  saveWorkoutToHealth, getHeartRateForWindow, mapMuscleGroupToActivity,
+} from '../utils/health';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -424,25 +429,66 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     setShowReview(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setShowReview(false);
+    const snapshotExercises = session.exercises;
+    const snapshotNotes = session.notes;
+    const snapshotStart = session.startTime || new Date().toISOString();
     onEnd();
     navigation.navigate('Home' as never);
 
+    // Read bodyweight for calorie calculation
+    const bw = await SecureStore.getItemAsync('body_weight_kg');
+
     // Save in background — user doesn't wait
-    getToken().then(token => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch(`${API_BASE}/api/workouts`, {
+    const token = await getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          date: session.startTime || new Date().toISOString(),
-          notes: session.notes,
-          exercises: session.exercises,
+          date: snapshotStart,
+          notes: snapshotNotes,
+          exercises: snapshotExercises,
+          bodyWeightKg: bw ? parseFloat(bw) : undefined,
         }),
-      }).catch(() => {});
-    });
+      });
+      const data = await res.json().catch(() => ({} as any));
+      const workoutId = data?.workoutId;
+
+      // Apple Health integration — only if connected
+      if (isHealthAvailable() && await isHealthConnected()) {
+        const startDate = new Date(snapshotStart);
+        const endDate = new Date();
+        const totalCal = snapshotExercises.reduce((a, e) => a + (e.calories || 0), 0);
+        const totalDistance = snapshotExercises.reduce((a, e) => a + (e.distance || 0), 0);
+        const firstEx = snapshotExercises[0];
+        const activityType = mapMuscleGroupToActivity(firstEx?.muscleGroup, firstEx?.name);
+
+        saveWorkoutToHealth({
+          activityType,
+          start: startDate,
+          end: endDate,
+          caloriesKcal: totalCal > 0 ? totalCal : undefined,
+          distanceMeters: totalDistance > 0 ? totalDistance : undefined,
+        }).catch(() => {});
+
+        getHeartRateForWindow(startDate, endDate).then(({ avg, max }) => {
+          if (avg != null && workoutId) {
+            fetch(`${API_BASE}/api/workouts/${workoutId}/metrics`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify({ avg_hr: avg, max_hr: max }),
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    } catch {
+      // Save failed — silent, user already navigated away
+    }
   };
 
   const handleDiscard = () => {
