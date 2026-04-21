@@ -7,25 +7,33 @@ interface Props {
   color?: string;
 }
 
-// Renders the DNA emoji 🧬 as a monochrome shape by using it as a mask over a
-// solid-color fill. The iOS colored glyph is hidden — only its silhouette shows
-// in whatever `color` is passed.
+// DNA emoji — written as codepoint so there is zero risk of encoding weirdness
+// in the source file dropping the surrogate pair.
+const DNA_EMOJI = String.fromCodePoint(0x1F9EC);
+
+// Renders the 🧬 emoji as a monochrome silhouette by using it as an alpha mask
+// over a solid color fill. `fontFamily: AppleColorEmoji` is forced on iOS so
+// the system always picks the emoji glyph (otherwise some Text environments
+// fall back to a plain font, producing the "tofu" missing-glyph box).
 export function DnaIcon({ size = 22, color = '#FFFFFF' }: Props) {
-  const fontSize = Math.round(size * 0.95);
+  const fontSize = Math.round(size * 0.92);
   return (
     <MaskedView
       style={{ width: size, height: size }}
       maskElement={
         <View style={styles.maskWrap}>
           <Text
-            style={{
-              fontSize,
-              lineHeight: Platform.OS === 'ios' ? size : fontSize + 2,
-              textAlign: 'center',
-              includeFontPadding: false,
-            }}
+            allowFontScaling={false}
+            style={[
+              styles.maskText,
+              {
+                fontSize,
+                lineHeight: Platform.OS === 'ios' ? size : fontSize + 2,
+              },
+              Platform.OS === 'ios' && { fontFamily: 'AppleColorEmoji' },
+            ]}
           >
-            🧬
+            {DNA_EMOJI}
           </Text>
         </View>
       }
@@ -41,5 +49,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'transparent',
+  },
+  maskText: {
+    textAlign: 'center',
+    includeFontPadding: false,
+    color: '#000',
   },
 });
