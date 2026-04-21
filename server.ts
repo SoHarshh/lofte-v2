@@ -54,6 +54,19 @@ if (USE_SUPABASE) {
       content TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
     );
+    CREATE TABLE IF NOT EXISTS health_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      steps INTEGER,
+      active_energy_kcal REAL,
+      resting_heart_rate REAL,
+      hrv_ms REAL,
+      sleep_hours REAL,
+      body_weight_kg REAL,
+      synced_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(user_id, date)
+    );
   `);
   console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
 }
@@ -244,6 +257,7 @@ async function dbDeleteAllUserData(userId: string) {
     }
     const { error: wErr } = await supabase.from("workouts").delete().eq("user_id", userId);
     if (wErr) throw wErr;
+    await supabase.from("health_metrics").delete().eq("user_id", userId);
     return;
   }
   // SQLite — exercises cascade from workouts FK, but delete explicitly to be safe
@@ -252,6 +266,78 @@ async function dbDeleteAllUserData(userId: string) {
     sqlite!.prepare(`DELETE FROM exercises WHERE workout_id IN (${workoutIds.map(() => '?').join(',')})`).run(...workoutIds);
   }
   sqlite!.prepare("DELETE FROM workouts WHERE user_id = ?").run(userId);
+  sqlite!.prepare("DELETE FROM health_metrics WHERE user_id = ?").run(userId);
+}
+
+// ─── Health metrics ──────────────────────────────────────────────────────────
+
+type HealthMetricInput = {
+  date: string; // YYYY-MM-DD
+  steps?: number | null;
+  activeEnergyKcal?: number | null;
+  restingHeartRate?: number | null;
+  hrvMs?: number | null;
+  sleepHours?: number | null;
+  bodyWeightKg?: number | null;
+};
+
+async function dbUpsertHealthMetrics(userId: string, metrics: HealthMetricInput[]) {
+  if (metrics.length === 0) return;
+  if (USE_SUPABASE && supabase) {
+    const rows = metrics.map(m => ({
+      user_id: userId,
+      date: m.date,
+      steps: m.steps ?? null,
+      active_energy_kcal: m.activeEnergyKcal ?? null,
+      resting_heart_rate: m.restingHeartRate ?? null,
+      hrv_ms: m.hrvMs ?? null,
+      sleep_hours: m.sleepHours ?? null,
+      body_weight_kg: m.bodyWeightKg ?? null,
+      synced_at: new Date().toISOString(),
+    }));
+    const { error } = await (supabase.from("health_metrics") as any).upsert(rows, { onConflict: "user_id,date" });
+    if (error) throw error;
+    return;
+  }
+  const stmt = sqlite!.prepare(`
+    INSERT INTO health_metrics (user_id, date, steps, active_energy_kcal, resting_heart_rate, hrv_ms, sleep_hours, body_weight_kg, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      steps = excluded.steps,
+      active_energy_kcal = excluded.active_energy_kcal,
+      resting_heart_rate = excluded.resting_heart_rate,
+      hrv_ms = excluded.hrv_ms,
+      sleep_hours = excluded.sleep_hours,
+      body_weight_kg = excluded.body_weight_kg,
+      synced_at = datetime('now')
+  `);
+  const tx = sqlite!.transaction((items: HealthMetricInput[]) => {
+    for (const m of items) {
+      stmt.run(
+        userId, m.date,
+        m.steps ?? null, m.activeEnergyKcal ?? null,
+        m.restingHeartRate ?? null, m.hrvMs ?? null,
+        m.sleepHours ?? null, m.bodyWeightKg ?? null,
+      );
+    }
+  });
+  tx(metrics);
+}
+
+async function dbGetHealthMetrics(userId: string, days: number) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  if (USE_SUPABASE && supabase) {
+    const { data, error } = await supabase.from("health_metrics")
+      .select("*").eq("user_id", userId).gte("date", cutoffStr).order("date", { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+  return sqlite!.prepare(
+    "SELECT * FROM health_metrics WHERE user_id = ? AND date >= ? ORDER BY date ASC"
+  ).all(userId, cutoffStr);
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -741,6 +827,50 @@ One exercise per block, blank line between exercises. Use **bold** for exercise 
     } catch (error: any) {
       console.error("Coach error:", error?.message || error);
       res.status(500).json({ error: "Coach temporarily unavailable. Try again." });
+    }
+  });
+
+  // ── Health metrics sync ─────────────────────────────────────────────────────
+  app.post("/api/health/metrics", requireAuth, async (req: any, res) => {
+    const { metrics } = req.body as { metrics: HealthMetricInput[] };
+    if (!Array.isArray(metrics) || metrics.length === 0) {
+      return res.status(400).json({ error: "metrics array required" });
+    }
+    try {
+      await dbUpsertHealthMetrics(req.userId, metrics);
+      res.json({ success: true, count: metrics.length });
+    } catch (error: any) {
+      console.error("Health metrics upsert error:", error);
+      res.status(500).json({ error: error.message || "Failed to sync health metrics" });
+    }
+  });
+
+  app.get("/api/health/summary", requireAuth, async (req: any, res) => {
+    const days = Math.min(Math.max(parseInt((req.query.days as string) || "7"), 1), 90);
+    try {
+      const rows = await dbGetHealthMetrics(req.userId, days) as any[];
+      const today = new Date().toISOString().slice(0, 10);
+      const todayRow = rows.find((r: any) => String(r.date).slice(0, 10) === today) || null;
+
+      const avg = (key: string) => {
+        const vals = rows.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+        return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+      };
+
+      res.json({
+        today: todayRow,
+        range: rows,
+        averages: {
+          steps: avg('steps'),
+          active_energy_kcal: avg('active_energy_kcal'),
+          resting_heart_rate: avg('resting_heart_rate'),
+          hrv_ms: avg('hrv_ms'),
+          sleep_hours: avg('sleep_hours'),
+        },
+      });
+    } catch (error: any) {
+      console.error("Health summary error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch health summary" });
     }
   });
 
