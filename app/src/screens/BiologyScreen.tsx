@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView,
   Platform, Animated, Easing, ActivityIndicator, TouchableOpacity,
 } from 'react-native';
-import Svg, { Path, Circle as SvgCircle, Defs, LinearGradient, Stop } from 'react-native-svg';
+import Svg, { Path, Circle as SvgCircle, Defs, LinearGradient, Stop, G } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,8 @@ import { isHealthAvailable, isHealthConnected, requestHealthPermissions } from '
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 const AnimatedPath = Animated.createAnimatedComponent(Path);
+const AnimatedCircle = Animated.createAnimatedComponent(SvgCircle);
+const AnimatedG = Animated.createAnimatedComponent(G);
 
 interface Props { colors: Record<string, string>; }
 
@@ -33,29 +35,53 @@ type Row = {
 // ─── Animated number counter ────────────────────────────────────────────────
 
 function AnimatedNumber({
-  value, style, decimals = 0, suffix = '',
+  value, style, decimals = 0, suffix = '', mountDelay = 0,
 }: {
   value: number;
   style?: any;
   decimals?: number;
   suffix?: string;
+  mountDelay?: number;
 }) {
   const [display, setDisplay] = useState(0);
+  const prev = useRef<number | null>(null);
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    const from = prev.current ?? 0;
+    const to = value;
+    if (from === to) { setDisplay(to); return; }
     anim.setValue(0);
-    const listener = anim.addListener(({ value: v }) => {
-      setDisplay(v * value);
+    let frame = from;
+    setDisplay(from);
+    const id = anim.addListener(({ value: t }) => {
+      const next = from + (to - from) * t;
+      const factor = Math.pow(10, decimals);
+      const rounded = Math.round(next * factor) / factor;
+      if (rounded !== frame) {
+        frame = rounded;
+        setDisplay(rounded);
+      }
     });
-    Animated.timing(anim, {
+    const animation = Animated.timing(anim, {
       toValue: 1,
-      duration: 900,
+      duration: 1000,
+      delay: mountDelay,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
-    }).start();
-    return () => anim.removeListener(listener);
-  }, [value]);
+    });
+    animation.start(({ finished }) => {
+      if (finished) {
+        prev.current = to;
+        setDisplay(to);
+      }
+      anim.removeListener(id);
+    });
+    return () => {
+      animation.stop();
+      anim.removeListener(id);
+    };
+  }, [value, decimals, mountDelay]);
 
   return <Text style={style}>{display.toFixed(decimals)}{suffix}</Text>;
 }
@@ -72,7 +98,8 @@ function Sparkline({
   gradientId: string;
 }) {
   const progress = useRef(new Animated.Value(0)).current;
-  const [pathLength, setPathLength] = useState(0);
+  const areaOpacity = useRef(new Animated.Value(0)).current;
+  const dotScale = useRef(new Animated.Value(0)).current;
 
   const values = data.filter((v) => typeof v === 'number' && !isNaN(v));
   const padding = 4;
@@ -81,37 +108,60 @@ function Sparkline({
 
   let path = '';
   let areaPath = '';
-  let dots: Array<{ x: number; y: number }> = [];
+  const dots: Array<{ x: number; y: number }> = [];
+  let pathLength = 0;
   if (values.length > 1) {
     const min = Math.min(...values);
     const max = Math.max(...values);
     const range = max - min || 1;
     const step = innerW / (values.length - 1);
 
+    let prev: { x: number; y: number } | null = null;
     values.forEach((v, i) => {
       const x = padding + i * step;
       const y = padding + innerH - ((v - min) / range) * innerH;
       path += i === 0 ? `M ${x} ${y}` : ` L ${x} ${y}`;
       dots.push({ x, y });
+      if (prev) {
+        const dx = x - prev.x;
+        const dy = y - prev.y;
+        pathLength += Math.sqrt(dx * dx + dy * dy);
+      }
+      prev = { x, y };
     });
     areaPath = `${path} L ${padding + innerW} ${padding + innerH} L ${padding} ${padding + innerH} Z`;
+    // Pad to keep the dasharray slightly longer than the actual length
+    pathLength = Math.ceil(pathLength) + 4;
   }
 
   useEffect(() => {
     if (!path) return;
     progress.setValue(0);
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: 1400,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start();
-  }, [path]);
-
-  const strokeDashoffset = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [pathLength || 500, 0],
-  });
+    areaOpacity.setValue(0);
+    dotScale.setValue(0);
+    Animated.sequence([
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 1100,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }),
+      Animated.parallel([
+        Animated.timing(areaOpacity, {
+          toValue: 1,
+          duration: 260,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false,
+        }),
+        Animated.spring(dotScale, {
+          toValue: 1,
+          friction: 6,
+          tension: 90,
+          useNativeDriver: false,
+        }),
+      ]),
+    ]).start();
+  }, [path, pathLength]);
 
   if (!path) {
     return (
@@ -121,7 +171,13 @@ function Sparkline({
     );
   }
 
+  const strokeDashoffset = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [pathLength, 0],
+  });
   const last = dots[dots.length - 1];
+  const dotR = dotScale.interpolate({ inputRange: [0, 1], outputRange: [0, 3] });
+  const haloR = dotScale.interpolate({ inputRange: [0, 1], outputRange: [0, 6] });
 
   return (
     <Svg width={width} height={height}>
@@ -131,7 +187,9 @@ function Sparkline({
           <Stop offset="1" stopColor={color} stopOpacity="0" />
         </LinearGradient>
       </Defs>
-      <Path d={areaPath} fill={`url(#${gradientId})`} />
+      <AnimatedG opacity={areaOpacity as any}>
+        <Path d={areaPath} fill={`url(#${gradientId})`} />
+      </AnimatedG>
       <AnimatedPath
         d={path}
         stroke={color}
@@ -139,15 +197,11 @@ function Sparkline({
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
-        strokeDasharray={pathLength || 500}
-        strokeDashoffset={strokeDashoffset}
-        onLayout={(e: any) => {
-          const len = (e?.nativeEvent?.layout?.width ?? 0) * 1.6 + 120;
-          if (len > 0 && pathLength === 0) setPathLength(len);
-        }}
+        strokeDasharray={`${pathLength}`}
+        strokeDashoffset={strokeDashoffset as any}
       />
-      {last && <SvgCircle cx={last.x} cy={last.y} r={3} fill={color} />}
-      {last && <SvgCircle cx={last.x} cy={last.y} r={6} fill={color} opacity={0.25} />}
+      {last && <AnimatedCircle cx={last.x} cy={last.y} r={haloR as any} fill={color} opacity={0.25} />}
+      {last && <AnimatedCircle cx={last.x} cy={last.y} r={dotR as any} fill={color} />}
     </Svg>
   );
 }
@@ -188,24 +242,22 @@ function FadeInUp({
 
 // ─── Pulsing halo (breathing circle behind hero icon) ──────────────────────
 
-function PulseHalo({ size = 110, color = '#10B981' }: { size?: number; color?: string }) {
-  const scale = useRef(new Animated.Value(0.9)).current;
-  const opacity = useRef(new Animated.Value(0.25)).current;
+function PulseHalo({ size = 110, color = 'rgba(255,255,255,0.85)' }: { size?: number; color?: string }) {
+  const t = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    Animated.loop(
-      Animated.parallel([
-        Animated.sequence([
-          Animated.timing(scale, { toValue: 1.15, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(scale, { toValue: 0.9, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
-        Animated.sequence([
-          Animated.timing(opacity, { toValue: 0.08, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(opacity, { toValue: 0.28, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ]),
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(t, { toValue: 1, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(t, { toValue: 0, duration: 2200, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
       ])
-    ).start();
+    );
+    loop.start();
+    return () => loop.stop();
   }, []);
+
+  const scale = t.interpolate({ inputRange: [0, 1], outputRange: [1, 1.14] });
+  const opacity = t.interpolate({ inputRange: [0, 1], outputRange: [0.18, 0.05] });
 
   return (
     <Animated.View
