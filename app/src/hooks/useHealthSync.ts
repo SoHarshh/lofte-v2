@@ -3,7 +3,8 @@ import { AppState } from 'react-native';
 import { API_BASE } from '../config';
 import { useAuthFetch } from './useAuthFetch';
 import {
-  isHealthAvailable, isHealthConnected, getTodayMetrics, HealthMetrics,
+  isHealthAvailable, isHealthConnected, getTodayMetrics, fetchDayMetrics,
+  HealthMetrics,
 } from '../utils/health';
 
 type SyncState = {
@@ -32,20 +33,28 @@ export function useHealthSync(): SyncState {
       const m = await getTodayMetrics();
       setMetrics(m);
 
-      const today = new Date().toISOString().slice(0, 10);
+      // Sync the last 14 days to the backend so Nyx has a real recent history.
+      // Non-blocking: if any fail, we just skip this cycle.
+      const days: Date[] = [];
+      for (let i = 0; i < 14; i++) {
+        const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - i);
+        days.push(d);
+      }
+      const dayMetrics = await Promise.all(days.map((d) =>
+        fetchDayMetrics(d).then((r) => ({
+          date: d.toISOString().slice(0, 10),
+          steps: r.steps,
+          activeEnergyKcal: r.activeEnergyKcal,
+          restingHeartRate: r.restingHeartRate,
+          hrvMs: r.hrvMs,
+          sleepHours: r.sleepHours,
+          bodyWeightKg: r.bodyWeightKg,
+        }))
+      ));
+
       await authFetch(`${API_BASE}/api/health/metrics`, {
         method: 'POST',
-        body: JSON.stringify({
-          metrics: [{
-            date: today,
-            steps: m.steps,
-            activeEnergyKcal: m.activeEnergyKcal,
-            restingHeartRate: m.restingHeartRate,
-            hrvMs: m.hrvMs,
-            sleepHours: m.sleepHours,
-            bodyWeightKg: m.bodyWeightKg,
-          }],
-        }),
+        body: JSON.stringify({ metrics: dayMetrics }),
       }).catch(() => { /* backend unreachable — try again later */ });
 
       setLastSyncedAt(Date.now());
