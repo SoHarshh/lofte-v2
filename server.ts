@@ -782,6 +782,51 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       try { history = await dbGetNyxHistory(req.userId, 30); } catch {}
       const hasHistory = history.length > 0;
 
+      // ── Pull Apple Health metrics (last 7 days) ──
+      let healthBlock = '';
+      try {
+        const metrics = await dbGetHealthMetrics(req.userId, 7) as any[];
+        if (metrics.length > 0) {
+          const today = now.toISOString().slice(0, 10);
+          const todayRow = metrics.find((r: any) => String(r.date).slice(0, 10) === today);
+
+          const avg = (key: string) => {
+            const vals = metrics.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+            return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+          };
+          const fmt = (n: number | null, d = 0) => n == null ? '—' : n.toFixed(d);
+          const trend = (cur: number | null, base: number | null) => {
+            if (cur == null || base == null) return '';
+            const diff = cur - base;
+            if (Math.abs(diff) < base * 0.03) return ' (stable)';
+            return diff > 0 ? ` (↑ from 7d avg ${base.toFixed(0)})` : ` (↓ from 7d avg ${base.toFixed(0)})`;
+          };
+
+          const hrv7 = avg('hrv_ms');
+          const rhr7 = avg('resting_heart_rate');
+          const sleep7 = avg('sleep_hours');
+          const steps7 = avg('steps');
+          const cal7 = avg('active_energy_kcal');
+
+          healthBlock = `
+RECOVERY & BODY (from Apple Health):
+HRV today: ${fmt(todayRow?.hrv_ms, 0)}ms${trend(todayRow?.hrv_ms ?? null, hrv7)}
+Resting HR today: ${fmt(todayRow?.resting_heart_rate, 0)}bpm${trend(todayRow?.resting_heart_rate ?? null, rhr7)}
+Sleep last night: ${fmt(todayRow?.sleep_hours, 1)}h (7d avg ${fmt(sleep7, 1)}h)
+Steps today: ${fmt(todayRow?.steps, 0)} (7d avg ${fmt(steps7, 0)})
+Active cal today: ${fmt(todayRow?.active_energy_kcal, 0)} (7d avg ${fmt(cal7, 0)})`;
+        }
+      } catch {}
+
+      // ── Recent workout HR (last 14d) ──
+      const cutoff14 = new Date(); cutoff14.setDate(now.getDate() - 14);
+      const hrWorkouts = allWorkouts
+        .filter((w: any) => new Date(w.date) >= cutoff14 && (w.avg_hr || w.max_hr))
+        .slice(0, 5)
+        .map((w: any) => `${w.date.slice(0, 10)}: avg ${w.avg_hr || '?'}bpm, peak ${w.max_hr || '?'}bpm`)
+        .join('; ');
+      const hrBlock = hrWorkouts ? `\nSession HR (14d): ${hrWorkouts}` : '';
+
       const systemInstruction = `You are Nyx, a personal training coach. Talk like a real coach texting their client — casual, direct, no fluff. You're not an assistant, you're their coach.
 
 ${isNewUser && !hasHistory ? `This is a brand new athlete with no data and no past conversations. Start by introducing yourself briefly: "Hey, I'm Nyx — your coach inside LOFTE." Then ask their name and what they're training for. Keep it short and warm. One question at a time — don't dump a list of questions. Build the relationship naturally across messages.` :
@@ -796,7 +841,7 @@ ${allWorkouts.length} total sessions, ${recent90.length} in last 90 days, ${this
 PRs: ${prLines}
 Muscles (30d): ${muscleLines}
 Volume (4wk): ${volTrend}
-Recent: ${recentLines || 'None.'}` : ''}
+Recent: ${recentLines || 'None.'}${hrBlock}${healthBlock}` : ''}
 
 RULES:
 - 2-3 sentences for quick answers. Keep conversations casual and short.
@@ -805,6 +850,9 @@ RULES:
 - Remember what they tell you across messages — name, goals, injuries, preferences.
 - Fitness, training, nutrition, recovery only. Anything else: "Not my lane — what's going on with training?"
 - Images: analyze form, equipment screens, food. Give specific feedback.
+- If HRV is trending down, resting HR is up, or sleep is short — factor that into training advice. Suggest lighter sessions, mobility, or a rest day instead of pushing intensity. Don't be silent about recovery signals.
+- If steps and active cal outside the gym are high, acknowledge the cumulative load. Strength numbers will feel heavy on high-cardio days.
+- Never invent health numbers. Only reference the Apple Health values shown above. If a value is "—", treat it as unavailable.
 
 FORMATTING:
 - For regular chat: plain text, no formatting. Write like you're texting.
