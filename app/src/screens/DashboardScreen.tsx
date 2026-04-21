@@ -11,6 +11,7 @@ import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
+import { useHealthSync } from '../hooks/useHealthSync';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -62,6 +63,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   const authFetch = useAuthFetch();
   const useKg = useUnits();
   const unit = unitLabel(useKg);
+  const health = useHealthSync();
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/api/workouts`)
@@ -247,6 +249,41 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
           </GlassCard>
         )}
 
+        {/* Apple Health — Today's body */}
+        {health.connected && health.metrics && (
+          <GlassCard style={styles.healthCard}>
+            <View style={styles.healthHeader}>
+              <Text style={styles.cardLabel}>TODAY</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Ionicons name="heart" size={10} color="#10B981" />
+                <Text style={styles.healthBadge}>APPLE HEALTH</Text>
+              </View>
+            </View>
+            <View style={styles.healthRow}>
+              <HealthTile
+                icon="footsteps-outline"
+                value={health.metrics.steps != null ? formatVol(health.metrics.steps) : '—'}
+                label="Steps"
+              />
+              <HealthTile
+                icon="flame-outline"
+                value={health.metrics.activeEnergyKcal != null ? String(health.metrics.activeEnergyKcal) : '—'}
+                label="Active Cal"
+              />
+              <HealthTile
+                icon="heart-outline"
+                value={health.metrics.restingHeartRate != null ? String(health.metrics.restingHeartRate) : '—'}
+                label="Resting HR"
+              />
+              <HealthTile
+                icon="moon-outline"
+                value={health.metrics.sleepHours != null ? `${health.metrics.sleepHours.toFixed(1)}h` : '—'}
+                label="Sleep"
+              />
+            </View>
+          </GlassCard>
+        )}
+
         {/* Empty state */}
         {workouts.length === 0 && (
           <View style={styles.empty}>
@@ -277,6 +314,20 @@ function ScoreCircle({ icon, value, label, onPress }: {
       </View>
       <Text style={styles.scoreLabel}>{label}</Text>
     </Wrap>
+  );
+}
+
+function HealthTile({ icon, value, label }: {
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.healthTile}>
+      <Ionicons name={icon} size={14} color="rgba(255,255,255,0.55)" style={{ marginBottom: 6 }} />
+      <Text style={styles.healthValue}>{value}</Text>
+      <Text style={styles.healthLabel}>{label}</Text>
+    </View>
   );
 }
 
@@ -351,6 +402,27 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 18,
   },
   chartTotal: { fontSize: 14, color: '#fff', fontWeight: '500' },
+
+  // Apple Health today card
+  healthCard: { marginBottom: 12 },
+  healthHeader: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 14,
+  },
+  healthBadge: {
+    fontSize: 9, fontWeight: '700', color: '#10B981',
+    letterSpacing: 1.5, textTransform: 'uppercase',
+  },
+  healthRow: { flexDirection: 'row', gap: 8 },
+  healthTile: {
+    flex: 1, alignItems: 'center',
+    paddingVertical: 12, paddingHorizontal: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+  },
+  healthValue: { fontSize: 16, fontWeight: '400', color: '#fff', marginBottom: 3 },
+  healthLabel: { fontSize: 9, color: 'rgba(255,255,255,0.38)', letterSpacing: 0.3 },
 
   // Empty
   empty: { alignItems: 'center', paddingTop: 28, gap: 10 },
