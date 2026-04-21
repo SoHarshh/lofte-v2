@@ -46,6 +46,8 @@ if (USE_SUPABASE) {
   `);
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN pace TEXT"); } catch {}
   try { sqlite.exec("ALTER TABLE exercises ADD COLUMN notes TEXT"); } catch {}
+  try { sqlite.exec("ALTER TABLE workouts ADD COLUMN avg_hr REAL"); } catch {}
+  try { sqlite.exec("ALTER TABLE workouts ADD COLUMN max_hr REAL"); } catch {}
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS nyx_messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,6 +55,19 @@ if (USE_SUPABASE) {
       role TEXT NOT NULL,
       content TEXT NOT NULL,
       created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS health_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      steps INTEGER,
+      active_energy_kcal REAL,
+      resting_heart_rate REAL,
+      hrv_ms REAL,
+      sleep_hours REAL,
+      body_weight_kg REAL,
+      synced_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(user_id, date)
     );
   `);
   console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
@@ -155,6 +170,18 @@ async function dbSaveWorkout(userId: string, date: string, notes: string, exerci
   return { workoutId, priorBests };
 }
 
+async function dbUpdateWorkoutHR(id: string, userId: string, avgHr: number | null, maxHr: number | null) {
+  if (USE_SUPABASE && supabase) {
+    const { error } = await (supabase.from("workouts") as any)
+      .update({ avg_hr: avgHr, max_hr: maxHr })
+      .eq("id", id).eq("user_id", userId);
+    if (error) throw error;
+    return;
+  }
+  sqlite!.prepare("UPDATE workouts SET avg_hr = ?, max_hr = ? WHERE id = ? AND user_id = ?")
+    .run(avgHr, maxHr, id, userId);
+}
+
 async function dbDeleteWorkout(id: string, userId: string) {
   if (USE_SUPABASE && supabase) {
     const { error } = await supabase.from("workouts").delete().eq("id", id).eq("user_id", userId);
@@ -244,6 +271,7 @@ async function dbDeleteAllUserData(userId: string) {
     }
     const { error: wErr } = await supabase.from("workouts").delete().eq("user_id", userId);
     if (wErr) throw wErr;
+    await supabase.from("health_metrics").delete().eq("user_id", userId);
     return;
   }
   // SQLite — exercises cascade from workouts FK, but delete explicitly to be safe
@@ -252,6 +280,78 @@ async function dbDeleteAllUserData(userId: string) {
     sqlite!.prepare(`DELETE FROM exercises WHERE workout_id IN (${workoutIds.map(() => '?').join(',')})`).run(...workoutIds);
   }
   sqlite!.prepare("DELETE FROM workouts WHERE user_id = ?").run(userId);
+  sqlite!.prepare("DELETE FROM health_metrics WHERE user_id = ?").run(userId);
+}
+
+// ─── Health metrics ──────────────────────────────────────────────────────────
+
+type HealthMetricInput = {
+  date: string; // YYYY-MM-DD
+  steps?: number | null;
+  activeEnergyKcal?: number | null;
+  restingHeartRate?: number | null;
+  hrvMs?: number | null;
+  sleepHours?: number | null;
+  bodyWeightKg?: number | null;
+};
+
+async function dbUpsertHealthMetrics(userId: string, metrics: HealthMetricInput[]) {
+  if (metrics.length === 0) return;
+  if (USE_SUPABASE && supabase) {
+    const rows = metrics.map(m => ({
+      user_id: userId,
+      date: m.date,
+      steps: m.steps ?? null,
+      active_energy_kcal: m.activeEnergyKcal ?? null,
+      resting_heart_rate: m.restingHeartRate ?? null,
+      hrv_ms: m.hrvMs ?? null,
+      sleep_hours: m.sleepHours ?? null,
+      body_weight_kg: m.bodyWeightKg ?? null,
+      synced_at: new Date().toISOString(),
+    }));
+    const { error } = await (supabase.from("health_metrics") as any).upsert(rows, { onConflict: "user_id,date" });
+    if (error) throw error;
+    return;
+  }
+  const stmt = sqlite!.prepare(`
+    INSERT INTO health_metrics (user_id, date, steps, active_energy_kcal, resting_heart_rate, hrv_ms, sleep_hours, body_weight_kg, synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      steps = excluded.steps,
+      active_energy_kcal = excluded.active_energy_kcal,
+      resting_heart_rate = excluded.resting_heart_rate,
+      hrv_ms = excluded.hrv_ms,
+      sleep_hours = excluded.sleep_hours,
+      body_weight_kg = excluded.body_weight_kg,
+      synced_at = datetime('now')
+  `);
+  const tx = sqlite!.transaction((items: HealthMetricInput[]) => {
+    for (const m of items) {
+      stmt.run(
+        userId, m.date,
+        m.steps ?? null, m.activeEnergyKcal ?? null,
+        m.restingHeartRate ?? null, m.hrvMs ?? null,
+        m.sleepHours ?? null, m.bodyWeightKg ?? null,
+      );
+    }
+  });
+  tx(metrics);
+}
+
+async function dbGetHealthMetrics(userId: string, days: number) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  if (USE_SUPABASE && supabase) {
+    const { data, error } = await supabase.from("health_metrics")
+      .select("*").eq("user_id", userId).gte("date", cutoffStr).order("date", { ascending: true });
+    if (error) throw error;
+    return data || [];
+  }
+  return sqlite!.prepare(
+    "SELECT * FROM health_metrics WHERE user_id = ? AND date >= ? ORDER BY date ASC"
+  ).all(userId, cutoffStr);
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -490,6 +590,19 @@ Only return { "exercises": [] } if the input contains absolutely no reference to
     }
   });
 
+  app.patch("/api/workouts/:id/metrics", requireAuth, async (req: any, res) => {
+    const { avg_hr, max_hr } = req.body as { avg_hr?: number | null; max_hr?: number | null };
+    try {
+      await dbUpdateWorkoutHR(req.params.id, req.userId,
+        typeof avg_hr === 'number' ? avg_hr : null,
+        typeof max_hr === 'number' ? max_hr : null);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Workout metrics update error:", error);
+      res.status(500).json({ error: error.message || "Failed to update workout metrics" });
+    }
+  });
+
   app.get("/api/exercises/last", requireAuth, async (req: any, res) => {
     const { name } = req.query as { name: string };
     if (!name) return res.status(400).json({ error: "name is required" });
@@ -669,6 +782,51 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       try { history = await dbGetNyxHistory(req.userId, 30); } catch {}
       const hasHistory = history.length > 0;
 
+      // ── Pull Apple Health metrics (last 7 days) ──
+      let healthBlock = '';
+      try {
+        const metrics = await dbGetHealthMetrics(req.userId, 7) as any[];
+        if (metrics.length > 0) {
+          const today = now.toISOString().slice(0, 10);
+          const todayRow = metrics.find((r: any) => String(r.date).slice(0, 10) === today);
+
+          const avg = (key: string) => {
+            const vals = metrics.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+            return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+          };
+          const fmt = (n: number | null, d = 0) => n == null ? '—' : n.toFixed(d);
+          const trend = (cur: number | null, base: number | null) => {
+            if (cur == null || base == null) return '';
+            const diff = cur - base;
+            if (Math.abs(diff) < base * 0.03) return ' (stable)';
+            return diff > 0 ? ` (↑ from 7d avg ${base.toFixed(0)})` : ` (↓ from 7d avg ${base.toFixed(0)})`;
+          };
+
+          const hrv7 = avg('hrv_ms');
+          const rhr7 = avg('resting_heart_rate');
+          const sleep7 = avg('sleep_hours');
+          const steps7 = avg('steps');
+          const cal7 = avg('active_energy_kcal');
+
+          healthBlock = `
+RECOVERY & BODY (from Apple Health):
+HRV today: ${fmt(todayRow?.hrv_ms, 0)}ms${trend(todayRow?.hrv_ms ?? null, hrv7)}
+Resting HR today: ${fmt(todayRow?.resting_heart_rate, 0)}bpm${trend(todayRow?.resting_heart_rate ?? null, rhr7)}
+Sleep last night: ${fmt(todayRow?.sleep_hours, 1)}h (7d avg ${fmt(sleep7, 1)}h)
+Steps today: ${fmt(todayRow?.steps, 0)} (7d avg ${fmt(steps7, 0)})
+Active cal today: ${fmt(todayRow?.active_energy_kcal, 0)} (7d avg ${fmt(cal7, 0)})`;
+        }
+      } catch {}
+
+      // ── Recent workout HR (last 14d) ──
+      const cutoff14 = new Date(); cutoff14.setDate(now.getDate() - 14);
+      const hrWorkouts = allWorkouts
+        .filter((w: any) => new Date(w.date) >= cutoff14 && (w.avg_hr || w.max_hr))
+        .slice(0, 5)
+        .map((w: any) => `${w.date.slice(0, 10)}: avg ${w.avg_hr || '?'}bpm, peak ${w.max_hr || '?'}bpm`)
+        .join('; ');
+      const hrBlock = hrWorkouts ? `\nSession HR (14d): ${hrWorkouts}` : '';
+
       const systemInstruction = `You are Nyx, a personal training coach. Talk like a real coach texting their client — casual, direct, no fluff. You're not an assistant, you're their coach.
 
 ${isNewUser && !hasHistory ? `This is a brand new athlete with no data and no past conversations. Start by introducing yourself briefly: "Hey, I'm Nyx — your coach inside LOFTE." Then ask their name and what they're training for. Keep it short and warm. One question at a time — don't dump a list of questions. Build the relationship naturally across messages.` :
@@ -683,7 +841,7 @@ ${allWorkouts.length} total sessions, ${recent90.length} in last 90 days, ${this
 PRs: ${prLines}
 Muscles (30d): ${muscleLines}
 Volume (4wk): ${volTrend}
-Recent: ${recentLines || 'None.'}` : ''}
+Recent: ${recentLines || 'None.'}${hrBlock}${healthBlock}` : ''}
 
 RULES:
 - 2-3 sentences for quick answers. Keep conversations casual and short.
@@ -692,6 +850,9 @@ RULES:
 - Remember what they tell you across messages — name, goals, injuries, preferences.
 - Fitness, training, nutrition, recovery only. Anything else: "Not my lane — what's going on with training?"
 - Images: analyze form, equipment screens, food. Give specific feedback.
+- If HRV is trending down, resting HR is up, or sleep is short — factor that into training advice. Suggest lighter sessions, mobility, or a rest day instead of pushing intensity. Don't be silent about recovery signals.
+- If steps and active cal outside the gym are high, acknowledge the cumulative load. Strength numbers will feel heavy on high-cardio days.
+- Never invent health numbers. Only reference the Apple Health values shown above. If a value is "—", treat it as unavailable.
 
 FORMATTING:
 - For regular chat: plain text, no formatting. Write like you're texting.
@@ -741,6 +902,50 @@ One exercise per block, blank line between exercises. Use **bold** for exercise 
     } catch (error: any) {
       console.error("Coach error:", error?.message || error);
       res.status(500).json({ error: "Coach temporarily unavailable. Try again." });
+    }
+  });
+
+  // ── Health metrics sync ─────────────────────────────────────────────────────
+  app.post("/api/health/metrics", requireAuth, async (req: any, res) => {
+    const { metrics } = req.body as { metrics: HealthMetricInput[] };
+    if (!Array.isArray(metrics) || metrics.length === 0) {
+      return res.status(400).json({ error: "metrics array required" });
+    }
+    try {
+      await dbUpsertHealthMetrics(req.userId, metrics);
+      res.json({ success: true, count: metrics.length });
+    } catch (error: any) {
+      console.error("Health metrics upsert error:", error);
+      res.status(500).json({ error: error.message || "Failed to sync health metrics" });
+    }
+  });
+
+  app.get("/api/health/summary", requireAuth, async (req: any, res) => {
+    const days = Math.min(Math.max(parseInt((req.query.days as string) || "7"), 1), 90);
+    try {
+      const rows = await dbGetHealthMetrics(req.userId, days) as any[];
+      const today = new Date().toISOString().slice(0, 10);
+      const todayRow = rows.find((r: any) => String(r.date).slice(0, 10) === today) || null;
+
+      const avg = (key: string) => {
+        const vals = rows.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+        return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+      };
+
+      res.json({
+        today: todayRow,
+        range: rows,
+        averages: {
+          steps: avg('steps'),
+          active_energy_kcal: avg('active_energy_kcal'),
+          resting_heart_rate: avg('resting_heart_rate'),
+          hrv_ms: avg('hrv_ms'),
+          sleep_hours: avg('sleep_hours'),
+        },
+      });
+    } catch (error: any) {
+      console.error("Health summary error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch health summary" });
     }
   });
 

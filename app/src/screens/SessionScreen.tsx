@@ -5,6 +5,7 @@ import {
   Platform, Modal, KeyboardAvoidingView,
   Dimensions, Linking,
 } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '@clerk/expo';
@@ -16,6 +17,11 @@ import { BlurView } from 'expo-blur';
 import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
 import { ExercisePicker } from '../components/ExercisePicker';
+import { useUnits, displayWeight, toLbs, unitLabel } from '../utils/units';
+import {
+  isHealthAvailable, isHealthConnected,
+  saveWorkoutToHealth, getHeartRateForWindow, mapMuscleGroupToActivity,
+} from '../utils/health';
 
 const SCREEN_H = Dimensions.get('window').height;
 
@@ -50,6 +56,8 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
   const insets = useSafeAreaInsets();
   const { getToken } = useAuth();
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const useKg = useUnits();
+  const unit = unitLabel(useKg);
 
   // Timer
   useEffect(() => {
@@ -203,7 +211,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       muscleGroup: '',
       sets: 1,
       reps: manualReps || 0,
-      weight: manualWeight || 0,
+      weight: toLbs(manualWeight || 0, useKg),
       notes: manualNotes.trim() || undefined,
     };
 
@@ -421,25 +429,66 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     setShowReview(true);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setShowReview(false);
+    const snapshotExercises = session.exercises;
+    const snapshotNotes = session.notes;
+    const snapshotStart = session.startTime || new Date().toISOString();
     onEnd();
     navigation.navigate('Home' as never);
 
+    // Read bodyweight for calorie calculation
+    const bw = await SecureStore.getItemAsync('body_weight_kg');
+
     // Save in background — user doesn't wait
-    getToken().then(token => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      fetch(`${API_BASE}/api/workouts`, {
+    const token = await getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/workouts`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          date: session.startTime || new Date().toISOString(),
-          notes: session.notes,
-          exercises: session.exercises,
+          date: snapshotStart,
+          notes: snapshotNotes,
+          exercises: snapshotExercises,
+          bodyWeightKg: bw ? parseFloat(bw) : undefined,
         }),
-      }).catch(() => {});
-    });
+      });
+      const data = await res.json().catch(() => ({} as any));
+      const workoutId = data?.workoutId;
+
+      // Apple Health integration — only if connected
+      if (isHealthAvailable() && await isHealthConnected()) {
+        const startDate = new Date(snapshotStart);
+        const endDate = new Date();
+        const totalCal = snapshotExercises.reduce((a, e) => a + (e.calories || 0), 0);
+        const totalDistance = snapshotExercises.reduce((a, e) => a + (e.distance || 0), 0);
+        const firstEx = snapshotExercises[0];
+        const activityType = mapMuscleGroupToActivity(firstEx?.muscleGroup, firstEx?.name);
+
+        saveWorkoutToHealth({
+          activityType,
+          start: startDate,
+          end: endDate,
+          caloriesKcal: totalCal > 0 ? totalCal : undefined,
+          distanceMeters: totalDistance > 0 ? totalDistance : undefined,
+        }).catch(() => {});
+
+        getHeartRateForWindow(startDate, endDate).then(({ avg, max }) => {
+          if (avg != null && workoutId) {
+            fetch(`${API_BASE}/api/workouts/${workoutId}/metrics`, {
+              method: 'PATCH',
+              headers,
+              body: JSON.stringify({ avg_hr: avg, max_hr: max }),
+            }).catch(() => {});
+          }
+        }).catch(() => {});
+      }
+    } catch {
+      // Save failed — silent, user already navigated away
+    }
   };
 
   const handleDiscard = () => {
@@ -459,9 +508,10 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     }
     if (hasSetsReps) {
       const setsStr = (ex.sets ?? 1) > 1 ? `${ex.sets}×` : '';
-      return `${setsStr}${ex.reps} reps${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+      const w = hasWeight ? ` @ ${displayWeight(ex.weight!, useKg)} ${unit}` : '';
+      return `${setsStr}${ex.reps} reps${w}`;
     }
-    if (hasWeight) return `${ex.weight} lbs`;
+    if (hasWeight) return `${displayWeight(ex.weight!, useKg)} ${unit}`;
     return '—';
   };
 
@@ -472,7 +522,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     for (const entry of [...session.transcript].reverse()) {
       for (const ex of entry.exercises ?? []) {
         const last = lastPerformance[ex.name.toLowerCase()];
-        if (last?.weight) return `Last ${ex.name}: ${last.sets}×${last.reps} @ ${last.weight} lbs`;
+        if (last?.weight) return `Last ${ex.name}: ${last.sets}×${last.reps} @ ${displayWeight(last.weight, useKg)} ${unit}`;
       }
     }
     return null;
@@ -644,7 +694,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
             {/* Previous performance hint */}
             {manualExercise && lastPerformance[manualExercise.toLowerCase()]?.weight != null && (
               <Text style={s.lastPerfHint}>
-                Last: {lastPerformance[manualExercise.toLowerCase()].reps} reps @ {lastPerformance[manualExercise.toLowerCase()].weight} lbs
+                Last: {lastPerformance[manualExercise.toLowerCase()].reps} reps @ {displayWeight(lastPerformance[manualExercise.toLowerCase()].weight, useKg)} {unit}
               </Text>
             )}
             <View style={s.manualDivider} />
@@ -653,7 +703,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
             <View style={s.manualFieldsRow}>
               {/* Weight */}
               <View style={s.manualField}>
-                <Text style={s.manualFieldLabel}>WEIGHT</Text>
+                <Text style={s.manualFieldLabel}>WEIGHT <Text style={s.unitHint}>{unit.toUpperCase()}</Text></Text>
                 <View style={s.stepperBox}>
                   <TouchableOpacity
                     style={s.stepperBtn}
@@ -801,9 +851,9 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
                     <Ionicons name="trophy" size={18} color="#F59E0B" />
                   </View>
                   <View>
-                    <Text style={s.prTitle}>New PR — {pr.exerciseName} {pr.weight} lbs</Text>
+                    <Text style={s.prTitle}>New PR — {pr.exerciseName} {displayWeight(pr.weight, useKg)} {unit}</Text>
                     {pr.previous && (
-                      <Text style={s.prPrev}>Previous best: {pr.previous} lbs</Text>
+                      <Text style={s.prPrev}>Previous best: {displayWeight(pr.previous, useKg)} {unit}</Text>
                     )}
                   </View>
                 </View>
@@ -987,6 +1037,7 @@ const s = StyleSheet.create({
     fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.40)',
     letterSpacing: 1.5, marginBottom: 10,
   },
+  unitHint: { color: 'rgba(255,255,255,0.22)', fontWeight: '500' },
   manualFieldDivider: {
     width: 1, height: 56, backgroundColor: 'rgba(255,255,255,0.10)',
   },

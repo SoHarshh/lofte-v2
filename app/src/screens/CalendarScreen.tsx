@@ -10,6 +10,7 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -54,6 +55,7 @@ export default function CalendarScreen({ colors }: Props) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const authFetch = useAuthFetch();
+  const useKg = useUnits();
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/api/workouts`)
@@ -225,7 +227,7 @@ export default function CalendarScreen({ colors }: Props) {
                     {/* Exercises preview */}
                     {w.exercises.slice(0, 3).map((ex, j) => (
                       <Text key={j} style={s.detailExercise}>
-                        {ex.name}{ex.weight ? ` — ${ex.sets}x${ex.reps} @ ${ex.weight} lbs` : ''}
+                        {ex.name}{ex.weight ? ` — ${ex.sets}x${ex.reps} @ ${displayWeight(ex.weight, useKg)} ${unitLabel(useKg)}` : ''}
                       </Text>
                     ))}
                     {w.exercises.length > 3 && (

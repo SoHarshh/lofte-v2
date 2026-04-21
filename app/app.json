@@ -20,7 +20,13 @@
         "NSMicrophoneUsageDescription": "LOFTE uses the microphone to log workouts by voice.",
         "NSCameraUsageDescription": "LOFTE uses the camera to scan gym machine displays.",
         "NSPhotoLibraryUsageDescription": "LOFTE can read photos to log workout data from machine displays.",
+        "NSHealthShareUsageDescription": "LOFTE reads your activity, heart rate, and sleep to personalize your training insights and coaching.",
+        "NSHealthUpdateUsageDescription": "LOFTE saves your workouts to Apple Health so they count toward your activity rings.",
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
       }
     },
     "web": {
@@ -36,7 +42,15 @@
       ],
       "expo-image-picker",
       "expo-web-browser",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "react-native-health",
+        {
+          "isClinicalDataEnabled": false,
+          "healthSharePermission": "LOFTE reads your activity, heart rate, and sleep to personalize your training insights and coaching.",
+          "healthUpdatePermission": "LOFTE saves your workouts to Apple Health so they count toward your activity rings."
+        }
+      ]
     ],
     "extra": {
       "eas": {

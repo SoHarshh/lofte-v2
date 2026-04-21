@@ -17,7 +17,9 @@ import SessionScreen from './src/screens/SessionScreen';
 import CoachScreen from './src/screens/CoachScreen';
 import CalorieDetailScreen from './src/screens/CalorieDetailScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
+import BiologyScreen from './src/screens/BiologyScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import { DnaIcon } from './src/components/DnaIcon';
 
 const CLERK_KEY =
   process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
@@ -49,17 +51,25 @@ const initialSession: SessionState = {
 
 function FadeScreen({ children }: { children: React.ReactNode }) {
   const isFocused = useIsFocused();
-  const opacity = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(isFocused ? 1 : 0)).current;
+  const animRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    if (isFocused) {
-      opacity.setValue(0);
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: 220,
-        useNativeDriver: true,
-      }).start();
+    // Stop any in-progress animation to prevent jitter on rapid switches
+    if (animRef.current) {
+      animRef.current.stop();
+      animRef.current = null;
     }
+
+    const anim = Animated.timing(opacity, {
+      toValue: isFocused ? 1 : 0,
+      duration: 180,
+      useNativeDriver: true,
+    });
+    animRef.current = anim;
+    anim.start(({ finished }) => {
+      if (finished) animRef.current = null;
+    });
   }, [isFocused]);
 
   return (
@@ -79,6 +89,7 @@ function FloatingTabBar({ state, navigation }: any) {
   const mainTabs = [
     { name: 'Home', activeIcon: 'home' as const, inactiveIcon: 'home-outline' as const },
     { name: 'History', activeIcon: 'time' as const, inactiveIcon: 'time-outline' as const },
+    { name: 'Biology', custom: 'dna' as const },
     { name: 'Profile', activeIcon: 'person' as const, inactiveIcon: 'person-outline' as const },
   ];
 
@@ -90,21 +101,28 @@ function FloatingTabBar({ state, navigation }: any) {
       {/* Main pill */}
       <View style={styles.tabPill} pointerEvents="box-none">
         <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
-        {mainTabs.map(({ name, activeIcon, inactiveIcon }) => {
-          const routeIndex = state.routes.findIndex((r: any) => r.name === name);
+        {mainTabs.map((tab: any) => {
+          const routeIndex = state.routes.findIndex((r: any) => r.name === tab.name);
           const isFocused = state.index === routeIndex;
           return (
             <TouchableOpacity
-              key={name}
+              key={tab.name}
               style={[styles.tabBtn, isFocused && styles.tabBtnActive]}
-              onPress={() => navigation.navigate(name)}
+              onPress={() => navigation.navigate(tab.name)}
               activeOpacity={0.7}
             >
-              <Ionicons
-                name={isFocused ? activeIcon : inactiveIcon}
-                size={22}
-                color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
-              />
+              {tab.custom === 'dna' ? (
+                <DnaIcon
+                  size={22}
+                  color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
+                />
+              ) : (
+                <Ionicons
+                  name={isFocused ? tab.activeIcon : tab.inactiveIcon}
+                  size={22}
+                  color={isFocused ? '#FFFFFF' : 'rgba(255,255,255,0.40)'}
+                />
+              )}
             </TouchableOpacity>
           );
         })}
@@ -157,6 +175,9 @@ function MainApp() {
         </Tab.Screen>
         <Tab.Screen name="History">
           {() => <FadeScreen><HistoryScreen colors={COLORS} /></FadeScreen>}
+        </Tab.Screen>
+        <Tab.Screen name="Biology">
+          {() => <FadeScreen><BiologyScreen colors={COLORS} /></FadeScreen>}
         </Tab.Screen>
         <Tab.Screen name="Profile">
           {() => <FadeScreen><ProfileScreen colors={COLORS} /></FadeScreen>}

@@ -10,6 +10,7 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout, Exercise } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -17,7 +18,8 @@ const FILTERS = ['All', 'This Week', 'This Month', 'Strength', 'Cardio', 'PRs'];
 
 interface Props { colors: Record<string, string>; }
 
-function formatExStats(ex: Exercise): string {
+function formatExStats(ex: Exercise, useKg = false): string {
+  const u = unitLabel(useKg);
   const hasCardio = ex.distance || ex.duration;
   const hasWeight = ex.weight && ex.weight > 0;
   const hasSetsReps = ex.sets && ex.reps && (ex.sets > 1 || ex.reps > 1);
@@ -28,7 +30,7 @@ function formatExStats(ex: Exercise): string {
     if (ex.pace) parts.push(ex.pace);
     return parts.join(' · ') || '—';
   }
-  if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${ex.weight} lbs` : ''}`;
+  if (hasSetsReps) return `${ex.sets}×${ex.reps}${hasWeight ? ` @ ${displayWeight(ex.weight!, useKg)} ${u}` : ''}`;
   return '—';
 }
 
@@ -59,6 +61,7 @@ export default function HistoryScreen({ colors }: Props) {
   const [expanded, setExpanded] = useState<number | null>(null);
   const insets = useSafeAreaInsets();
   const authFetch = useAuthFetch();
+  const useKg = useUnits();
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/api/workouts`)
@@ -214,7 +217,7 @@ export default function HistoryScreen({ colors }: Props) {
                         <View style={s.exDot} />
                         <View style={{ flex: 1 }}>
                           <Text style={s.exName}>{ex.name}</Text>
-                          <Text style={s.exStats}>{formatExStats(ex)}</Text>
+                          <Text style={s.exStats}>{formatExStats(ex, useKg)}</Text>
                         </View>
                       </View>
                     ))}

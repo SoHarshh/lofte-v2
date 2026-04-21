@@ -18,6 +18,8 @@ export interface Workout {
   date: string;
   notes: string;
   exercises: Exercise[];
+  avg_hr?: number | null;
+  max_hr?: number | null;
 }
 
 export interface TranscriptEntry {
