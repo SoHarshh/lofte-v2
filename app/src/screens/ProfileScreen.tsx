@@ -2,9 +2,10 @@ import React, { useCallback, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, Platform, Image, Switch,
-  Modal, Alert,
+  Modal, Alert, ActionSheetIOS, Pressable,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +57,7 @@ export default function ProfileScreen({ colors }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [healthOn, setHealthOn] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
   const insets = useSafeAreaInsets();
   const { user } = useUser();
   const { signOut } = useAuth();
@@ -102,6 +104,83 @@ export default function ProfileScreen({ colors }: Props) {
   const displayName = user?.fullName || user?.firstName || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Athlete';
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
   const avatarUrl = user?.imageUrl;
+
+  // Avatar picker: choose a source, pick/capture, upload to Clerk.
+  // Clerk stores the image on the user record, so it persists across sessions
+  // and any re-auth. `user.imageUrl` auto-updates after setProfileImage resolves.
+  const uploadAvatar = async (useCamera: boolean) => {
+    if (avatarUploading || !user) return;
+    const perm = useCamera
+      ? await ImagePicker.requestCameraPermissionsAsync()
+      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert(
+        useCamera ? 'Camera access needed' : 'Photos access needed',
+        'Enable it in Settings to change your profile photo.'
+      );
+      return;
+    }
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync({
+          quality: 0.7, base64: true, allowsEditing: true, aspect: [1, 1],
+        })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          quality: 0.7, base64: true, allowsEditing: true, aspect: [1, 1],
+        });
+    if (result.canceled || !result.assets?.[0]?.base64) return;
+    setAvatarUploading(true);
+    try {
+      const dataUrl = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      await user.setProfileImage({ file: dataUrl });
+      // Clerk's useUser auto-refreshes after setProfileImage resolves.
+    } catch (err: any) {
+      Alert.alert('Upload failed', err?.errors?.[0]?.longMessage ?? err?.message ?? 'Could not update photo.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    if (avatarUploading || !user) return;
+    setAvatarUploading(true);
+    try {
+      await user.setProfileImage({ file: null });
+    } catch (err: any) {
+      Alert.alert('Failed', err?.message ?? 'Could not remove photo.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  const openAvatarSheet = () => {
+    if (avatarUploading) return;
+    const hasAvatar = !!avatarUrl;
+    if (Platform.OS === 'ios') {
+      const options = ['Cancel', 'Take Photo', 'Choose from Library'];
+      if (hasAvatar) options.push('Remove Photo');
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: hasAvatar ? 3 : undefined,
+        },
+        (idx) => {
+          if (idx === 1) uploadAvatar(true);
+          else if (idx === 2) uploadAvatar(false);
+          else if (idx === 3 && hasAvatar) removeAvatar();
+        }
+      );
+    } else {
+      const buttons: any[] = [
+        { text: 'Take Photo', onPress: () => uploadAvatar(true) },
+        { text: 'Choose from Library', onPress: () => uploadAvatar(false) },
+      ];
+      if (hasAvatar) buttons.push({ text: 'Remove Photo', style: 'destructive', onPress: removeAvatar });
+      buttons.push({ text: 'Cancel', style: 'cancel' });
+      Alert.alert('Profile photo', undefined, buttons);
+    }
+  };
 
   const load = useCallback(() => {
     authFetch(`${API_BASE}/api/workouts`)
@@ -166,13 +245,28 @@ export default function ProfileScreen({ colors }: Props) {
       >
         {/* Avatar + identity */}
         <View style={s.hero}>
-          <View style={s.avatarWrap}>
+          <Pressable
+            onPress={openAvatarSheet}
+            style={({ pressed }) => [s.avatarWrap, pressed && { opacity: 0.85 }]}
+            hitSlop={6}
+          >
             <View style={s.avatarHighlight} />
             {avatarUrl
               ? <Image source={{ uri: avatarUrl }} style={StyleSheet.absoluteFillObject} />
               : <Text style={[s.avatarInitials, { fontFamily: SYSTEM }]}>{initials}</Text>
             }
-          </View>
+            {/* Camera overlay badge — indicates tap-to-change */}
+            {!avatarUploading && (
+              <View style={s.avatarBadge}>
+                <Ionicons name="camera" size={12} color="#050B14" />
+              </View>
+            )}
+            {avatarUploading && (
+              <View style={s.avatarOverlay}>
+                <ActivityIndicator color="#fff" />
+              </View>
+            )}
+          </Pressable>
           <Text style={[s.name, { fontFamily: SYSTEM }]}>{displayName}</Text>
           <Text style={s.memberLabel}>LOFTE MEMBER</Text>
         </View>
@@ -366,6 +460,21 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.28)',
   },
   avatarInitials: { fontSize: 34, fontWeight: '400', color: '#fff' },
+  avatarBadge: {
+    position: 'absolute',
+    bottom: 0, right: 0,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 2, borderColor: '#050B14',
+    alignItems: 'center', justifyContent: 'center',
+    zIndex: 2,
+  },
+  avatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(5,11,20,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+    zIndex: 2,
+  },
   name: { fontSize: 26, fontWeight: '400', color: '#fff', marginBottom: 6 },
   memberLabel: {
     fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.35)',
