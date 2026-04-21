@@ -1,8 +1,7 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, TextInput, Pressable, Animated, Easing,
-  ActivityIndicator,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,8 +13,6 @@ import { MetricBarChart } from '../components/MetricBarChart';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
-import { useHealthDay } from '../hooks/useHealthDay';
-import { useMetricSeries, Period as SeriesPeriod } from '../hooks/useMetricSeries';
 import { FONT_LIGHT, FONT_MEDIUM } from '../utils/fonts';
 
 interface Props { colors: Record<string, string>; }
@@ -23,6 +20,70 @@ type Period = 'W' | 'M' | 'Y';
 
 function workoutCalories(w: Workout): number {
   return w.exercises.reduce((a, e) => a + (e.calories || 0), 0);
+}
+function startOfDay(d: Date): Date {
+  const x = new Date(d); x.setHours(0, 0, 0, 0); return x;
+}
+function daysBetween(a: Date, b: Date): number {
+  return Math.round((startOfDay(a).getTime() - startOfDay(b).getTime()) / 86_400_000);
+}
+
+const WEEK_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Build the chart series from workout logs only.
+function buildSeries(workouts: Workout[], period: Period, anchor: Date) {
+  const end = startOfDay(anchor);
+  // Daily bucket first
+  const dailyMap = new Map<string, number>();
+  workouts.forEach((w) => {
+    const key = w.date.slice(0, 10);
+    dailyMap.set(key, (dailyMap.get(key) || 0) + workoutCalories(w));
+  });
+
+  if (period === 'W') {
+    const points: { label: string; value: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(end); d.setDate(end.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      points.push({
+        label: WEEK_LABELS[(d.getDay() + 6) % 7],
+        value: Math.round(dailyMap.get(key) || 0),
+      });
+    }
+    return points;
+  }
+
+  if (period === 'M') {
+    // 4 weekly buckets, each summed over 7 days
+    const weeks: number[] = [0, 0, 0, 0];
+    for (let i = 0; i < 28; i++) {
+      const d = new Date(end); d.setDate(end.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const bucket = 3 - Math.floor(i / 7); // bucket 0 = oldest, 3 = this week
+      if (bucket >= 0 && bucket < 4) {
+        weeks[bucket] += dailyMap.get(key) || 0;
+      }
+    }
+    return weeks.map((v, i) => ({ label: `W${i + 1}`, value: Math.round(v) }));
+  }
+
+  // Y → 12 monthly totals
+  const months: { label: string; value: number }[] = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(end);
+    d.setMonth(d.getMonth() - i, 1);
+    months.push({ label: MONTH_LABELS[d.getMonth()], value: 0 });
+  }
+  workouts.forEach((w) => {
+    const d = new Date(w.date);
+    const idx = 11 - ((end.getFullYear() - d.getFullYear()) * 12 + (end.getMonth() - d.getMonth()));
+    if (idx >= 0 && idx < 12) {
+      months[idx].value += workoutCalories(w);
+    }
+  });
+  months.forEach((m) => { m.value = Math.round(m.value); });
+  return months;
 }
 
 // ─── Staggered fade-up ─────────────────────────────────────────────────────
@@ -93,9 +154,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
   const navigation = useNavigation();
   const authFetch = useAuthFetch();
 
-  const today = (() => { const t = new Date(); t.setHours(0, 0, 0, 0); return t; })();
-  const health = useHealthDay(today);
-  const series = useMetricSeries('cal', period as SeriesPeriod, today);
+  const today = useMemo(() => startOfDay(new Date()), []);
 
   useEffect(() => {
     SecureStore.getItemAsync('calorie_goal').then(v => { if (v) { setGoal(parseInt(v)); setGoalInput(v); } });
@@ -122,25 +181,41 @@ export default function CalorieDetailScreen({ colors }: Props) {
     SecureStore.setItemAsync('calorie_goal', String(val));
   };
 
-  // Today's calories — prefer Apple Health total, fall back to workout-derived
+  // Today's workout calories
   const todayKey = today.toISOString().slice(0, 10);
-  const workoutCalToday = Math.round(workouts
-    .filter(w => w.date.slice(0, 10) === todayKey)
-    .reduce((a, w) => a + workoutCalories(w), 0));
-  const healthCalToday = health.summary.activeEnergyKcal;
-  const displayedToday = healthCalToday ?? workoutCalToday;
-  const otherToday = healthCalToday != null ? Math.max(0, healthCalToday - workoutCalToday) : null;
+  const todayCal = useMemo(() => Math.round(
+    workouts
+      .filter(w => w.date.slice(0, 10) === todayKey)
+      .reduce((a, w) => a + workoutCalories(w), 0)
+  ), [workouts, todayKey]);
 
-  // 7d average from real daily range
-  const seriesVals = series.data.map(p => p.value).filter(v => v > 0);
-  const avg7 = seriesVals.length > 0
-    ? Math.round(seriesVals.reduce((a, b) => a + b, 0) / seriesVals.length)
-    : 0;
-  const trendDelta = avg7 > 0 && displayedToday > 0
-    ? +(((displayedToday - avg7) / avg7) * 100).toFixed(1)
+  // Last 7 days (excluding today) for the trend comparison
+  const weekAvg = useMemo(() => {
+    let sum = 0, days = 0;
+    for (let i = 1; i <= 7; i++) {
+      const d = new Date(today); d.setDate(today.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      const cal = workouts
+        .filter(w => w.date.slice(0, 10) === key)
+        .reduce((a, w) => a + workoutCalories(w), 0);
+      if (cal > 0) { sum += cal; days++; }
+    }
+    return days > 0 ? Math.round(sum / days) : 0;
+  }, [workouts, today]);
+
+  const trendDelta = weekAvg > 0 && todayCal > 0
+    ? +(((todayCal - weekAvg) / weekAvg) * 100).toFixed(1)
     : null;
 
-  const progress = goal > 0 ? displayedToday / goal : 0;
+  // Today's session count + most recent session
+  const todayWorkouts = workouts.filter(w => w.date.slice(0, 10) === todayKey);
+  const lastWorkout = workouts[0]; // list is ordered desc by date
+
+  // Chart series from workout logs
+  const seriesData = useMemo(() => buildSeries(workouts, period, today), [workouts, period, today]);
+  const seriesHasData = seriesData.some(p => p.value > 0);
+
+  const progress = goal > 0 ? todayCal / goal : 0;
   const ringColor = progress >= 1 ? '#10B981' : 'rgba(255,255,255,0.85)';
 
   return (
@@ -167,7 +242,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
           </View>
         </FadeInUp>
 
-        {/* Hero — compact ring + trend + breakdown inline */}
+        {/* Hero — compact ring + trend + session count */}
         <FadeInUp delay={40}>
           <HealthCard style={{ marginBottom: 10 }} padding={14}>
             <View style={s.heroRow}>
@@ -180,16 +255,15 @@ export default function CalorieDetailScreen({ colors }: Props) {
               >
                 <View style={{ alignItems: 'center' }}>
                   <CountUp
-                    value={displayedToday}
+                    value={todayCal}
                     style={[s.ringValue, { fontFamily: FONT_LIGHT }]}
                   />
                   <Text style={s.ringCaption}>of {goal}</Text>
                 </View>
               </RingProgress>
 
-              {/* Right-side info stack */}
               <View style={s.heroInfo}>
-                <Text style={s.heroLabel}>ACTIVE CAL</Text>
+                <Text style={s.heroLabel}>FROM WORKOUTS</Text>
                 {trendDelta != null ? (
                   <View style={[s.trendPill, trendDelta >= 0 ? s.trendPillUp : s.trendPillDown]}>
                     <Text style={s.trendText}>
@@ -197,26 +271,30 @@ export default function CalorieDetailScreen({ colors }: Props) {
                     </Text>
                   </View>
                 ) : (
-                  <Text style={s.heroMuted}>Build a 7-day trend</Text>
+                  <Text style={s.heroMuted}>Log sessions to build a trend</Text>
                 )}
-                <Text style={s.heroMuted}>
-                  {trendDelta != null ? `vs 7-day avg (${avg7})` : ''}
-                </Text>
+                {trendDelta != null && (
+                  <Text style={s.heroMuted}>vs 7-day avg ({weekAvg})</Text>
+                )}
 
-                {healthCalToday != null && (
-                  <View style={s.miniBreakdown}>
-                    <View style={s.miniRow}>
-                      <Ionicons name="barbell-outline" size={10} color="rgba(255,255,255,0.45)" />
-                      <Text style={s.miniLabel}>Workouts</Text>
-                      <Text style={s.miniValue}>{workoutCalToday}</Text>
-                    </View>
-                    <View style={s.miniRow}>
-                      <Ionicons name="walk-outline" size={10} color="rgba(255,255,255,0.45)" />
-                      <Text style={s.miniLabel}>Other</Text>
-                      <Text style={s.miniValue}>{otherToday ?? 0}</Text>
-                    </View>
+                <View style={s.miniBreakdown}>
+                  <View style={s.miniRow}>
+                    <Ionicons name="barbell-outline" size={10} color="rgba(255,255,255,0.45)" />
+                    <Text style={s.miniLabel}>Sessions today</Text>
+                    <Text style={s.miniValue}>{todayWorkouts.length}</Text>
                   </View>
-                )}
+                  {lastWorkout && (
+                    <View style={s.miniRow}>
+                      <Ionicons name="time-outline" size={10} color="rgba(255,255,255,0.45)" />
+                      <Text style={s.miniLabel}>Last session</Text>
+                      <Text style={s.miniValue}>
+                        {daysBetween(today, new Date(lastWorkout.date)) === 0
+                          ? 'Today'
+                          : `${daysBetween(today, new Date(lastWorkout.date))}d ago`}
+                      </Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </View>
           </HealthCard>
@@ -242,22 +320,18 @@ export default function CalorieDetailScreen({ colors }: Props) {
               })}
             </View>
             <View key={period}>
-              {series.loading ? (
-                <View style={s.chartEmpty}>
-                  <ActivityIndicator color="rgba(255,255,255,0.55)" />
-                </View>
-              ) : series.data.length === 0 ? (
-                <View style={s.chartEmpty}>
-                  <Text style={s.chartEmptyText}>No data yet</Text>
-                </View>
+              {seriesHasData ? (
+                <MetricBarChart data={seriesData} unit="kcal" compact />
               ) : (
-                <MetricBarChart data={series.data} unit="kcal" compact />
+                <View style={s.chartEmpty}>
+                  <Text style={s.chartEmptyText}>No sessions logged yet</Text>
+                </View>
               )}
             </View>
           </HealthCard>
         </FadeInUp>
 
-        {/* Settings — collapsed by default, tight */}
+        {/* Settings */}
         <FadeInUp delay={160}>
           <HealthCard style={{ marginBottom: 8 }} padding={0}>
             <TouchableOpacity
@@ -350,7 +424,6 @@ const s = StyleSheet.create({
     letterSpacing: 1.4, textTransform: 'uppercase',
   },
 
-  // Hero — side-by-side ring + info
   heroRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -399,7 +472,6 @@ const s = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
 
-  // Period pill
   periodBar: {
     flexDirection: 'row', gap: 4,
     padding: 3, borderRadius: 100,
@@ -423,7 +495,6 @@ const s = StyleSheet.create({
     fontSize: 11, color: 'rgba(255,255,255,0.35)', letterSpacing: 0.3,
   },
 
-  // Settings
   settingsRow: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 14, paddingVertical: 12, gap: 12,
