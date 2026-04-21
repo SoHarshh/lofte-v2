@@ -14,6 +14,10 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
+import {
+  isHealthAvailable, isHealthConnected, setHealthConnected,
+  requestHealthPermissions,
+} from '../utils/health';
 
 const SERIF = Platform.OS === 'ios' ? 'Georgia' : 'serif';
 
@@ -43,17 +47,14 @@ function formatVol(v: number): string {
   return `${Math.round(v)}`;
 }
 
-const CONNECTED_DEVICES = [
-  { icon: 'heart-outline' as const, label: 'Apple Health' },
-  { icon: 'watch-outline' as const, label: 'Whoop' },
-];
-
 export default function ProfileScreen({ colors }: Props) {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [loading, setLoading] = useState(true);
   const [useKg, setUseKg] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [healthOn, setHealthOn] = useState(false);
+  const [healthBusy, setHealthBusy] = useState(false);
   const insets = useSafeAreaInsets();
   const { user } = useUser();
   const { signOut } = useAuth();
@@ -61,11 +62,40 @@ export default function ProfileScreen({ colors }: Props) {
 
   useEffect(() => {
     SecureStore.getItemAsync('units_kg').then(v => { if (v === 'true') setUseKg(true); });
+    isHealthConnected().then(setHealthOn);
   }, []);
 
   const toggleUnits = (val: boolean) => {
     setUseKg(val);
     SecureStore.setItemAsync('units_kg', String(val));
+  };
+
+  const toggleHealth = async (val: boolean) => {
+    if (healthBusy) return;
+    if (!isHealthAvailable()) {
+      Alert.alert('Unavailable', 'Apple Health is only supported on iOS devices.');
+      return;
+    }
+    setHealthBusy(true);
+    try {
+      if (val) {
+        const granted = await requestHealthPermissions();
+        if (granted) {
+          setHealthOn(true);
+        } else {
+          Alert.alert(
+            'Permission needed',
+            'Enable Apple Health access in Settings → Privacy → Health → LOFTE to connect.'
+          );
+          setHealthOn(false);
+        }
+      } else {
+        await setHealthConnected(false);
+        setHealthOn(false);
+      }
+    } finally {
+      setHealthBusy(false);
+    }
   };
 
   const displayName = user?.fullName || user?.firstName || user?.emailAddresses?.[0]?.emailAddress?.split('@')[0] || 'Athlete';
@@ -177,20 +207,43 @@ export default function ProfileScreen({ colors }: Props) {
         {/* Connected Devices */}
         <Text style={[s.sectionTitle, { marginTop: 24 }]}>Connected Devices</Text>
         <GlassCard padding={0} style={s.settingsCard}>
-          {CONNECTED_DEVICES.map(({ icon, label }, i) => (
-            <View
-              key={label}
-              style={[s.settingsRow, i < CONNECTED_DEVICES.length - 1 && s.settingsRowBorder]}
-            >
-              <View style={s.settingsIconWrap}>
-                <Ionicons name={icon} size={18} color="rgba(255,255,255,0.35)" />
-              </View>
-              <Text style={[s.settingsLabel, { color: 'rgba(255,255,255,0.45)' }]}>{label}</Text>
-              <View style={s.comingSoonBadge}>
-                <Text style={s.comingSoonText}>Soon</Text>
-              </View>
+          {/* Apple Health — active */}
+          <View style={[s.settingsRow, s.settingsRowBorder]}>
+            <View style={s.settingsIconWrap}>
+              <Ionicons name="heart-outline" size={18} color={healthOn ? '#10B981' : 'rgba(255,255,255,0.55)'} />
             </View>
-          ))}
+            <View style={{ flex: 1 }}>
+              <Text style={s.settingsLabel}>Apple Health</Text>
+              <Text style={s.settingsSubLabel}>
+                {!isHealthAvailable()
+                  ? 'iOS only'
+                  : healthOn
+                    ? 'Connected · syncing biometrics'
+                    : 'Sync steps, sleep, heart rate & HRV'}
+              </Text>
+            </View>
+            {healthBusy ? (
+              <ActivityIndicator color="rgba(255,255,255,0.70)" />
+            ) : (
+              <Switch
+                value={healthOn}
+                onValueChange={toggleHealth}
+                disabled={!isHealthAvailable()}
+                trackColor={{ false: 'rgba(255,255,255,0.15)', true: 'rgba(16,185,129,0.55)' }}
+                thumbColor="#fff"
+              />
+            )}
+          </View>
+          {/* Whoop — coming soon */}
+          <View style={s.settingsRow}>
+            <View style={s.settingsIconWrap}>
+              <Ionicons name="watch-outline" size={18} color="rgba(255,255,255,0.35)" />
+            </View>
+            <Text style={[s.settingsLabel, { color: 'rgba(255,255,255,0.45)', flex: 1 }]}>Whoop</Text>
+            <View style={s.comingSoonBadge}>
+              <Text style={s.comingSoonText}>Soon</Text>
+            </View>
+          </View>
         </GlassCard>
 
         {/* Account */}
