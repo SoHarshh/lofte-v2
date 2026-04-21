@@ -73,7 +73,7 @@ Screen layout:
 - `src/screens/HistoryScreen.tsx` — workout history with filters. Centered "HISTORY" title matching Health tab header pattern.
 - `src/screens/ProfileScreen.tsx` — avatar (tap to change: Take Photo / Library / Remove, persists via Clerk `user.setProfileImage`), stats grid, units toggle, Apple Health toggle (Switch wired to `requestHealthPermissions` + SecureStore flag), Whoop "Soon", account section.
 - `src/screens/CoachScreen.tsx` — Nyx AI coach chat. Voice + text + image input. Nyx has access to workout history AND Apple Health metrics (HRV/RHR/sleep/steps/cal/session HR) via backend context.
-- `src/screens/CalorieDetailScreen.tsx` — animated ring, goal + bodyweight settings. Reached from Dashboard Calories circle.
+- `src/screens/CalorieDetailScreen.tsx` — reached from Dashboard Calories circle. Compact one-screen layout (no scroll): side-by-side ring + trend pill + session count, W/M/Y bar chart (compact mode), collapsed Daily Goal + Body Weight edit rows. **Fed only by workout logs** (not HealthKit) — updates via `useFocusEffect(load)` whenever the screen is focused.
 - `src/screens/CalendarScreen.tsx` — monthly grid, dots on workout days, tap for day summary.
 - `src/screens/BiologyScreen.tsx` — **Health tab** (route name "Health", tab icon `pulse`/`pulse-outline`). Two views: Home (hero HRV with 24-hour sparkline, day-over-day delta, Activity rings, Resting HR + Sleep tiles with live indicators) and MetricDetail (full drill-down with D/W/M/Y period selector, tap-to-scrub line/bar charts, About/Range/High/Low info cards). Left/right arrows on the header step through days. Intro animations play once per JS session via module-scoped `HOME_INTRO_PLAYED` flag.
 - `src/screens/LoginScreen.tsx` — OAuth (Apple/Google via Clerk SSO), email sign-in/up, forgot password. LOFTE wordmark kept in Georgia. Email auth still has Clerk SDK v3 issues.
@@ -151,6 +151,13 @@ cd app && eas build --platform ios --profile preview
 **Font loading**: `@expo-google-fonts/inter` + `@expo-google-fonts/fraunces` register 10 weight families via `useFonts` in `App.tsx`. App shows a loading spinner until both families resolve (~100ms). Adding/removing weights = change the imports in `App.tsx` + keep postscript names in `fonts.ts` in sync.
 
 **Health tab "animate once" rule**: module-scoped `HOME_INTRO_PLAYED` flag + `AnimateContext` make the Home's staggered fade-ups, number count-ups, ring sweeps, and sparkline draw-ins play exactly once per JS session. MetricDetail screens always re-animate on open (that's UI feedback for the user's tap).
+
+**Data-source split (architectural decision, locked in)**:
+- **Health tab (BiologyScreen)** → strictly Apple Health. Never mix in workout logs. If HealthKit has no data for a metric, render `—`.
+- **Calorie detail screen + Dashboard calorie circle** → strictly workout logs from `/api/workouts`. Never reads Apple Health. Ensures immediate feedback after a session save (via `useFocusEffect(load)`).
+- **Nyx (coach endpoint)** → the only place both sources merge. Backend `/api/ai/coach` injects two blocks into the system prompt: `RECOVERY & BODY` (from `health_metrics` table, seeded by `useHealthSync`) and `Session HR (14d)` (from `workouts.avg_hr`/`max_hr` columns).
+
+When adding new surfaces, decide the data source up front. Don't blend.
 
 ## Known Issues
 
