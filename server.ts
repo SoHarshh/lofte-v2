@@ -69,6 +69,20 @@ if (USE_SUPABASE) {
       synced_at TEXT DEFAULT (datetime('now')),
       UNIQUE(user_id, date)
     );
+    CREATE TABLE IF NOT EXISTS user_profile (
+      user_id TEXT PRIMARY KEY,
+      email TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      avatar_url TEXT,
+      dob TEXT,
+      sex TEXT,
+      height_cm REAL,
+      weight_kg REAL,
+      health_connected_at TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
   console.log('Storage: SQLite (set SUPABASE_URL + SUPABASE_SERVICE_KEY to switch to Supabase)');
 }
@@ -272,6 +286,7 @@ async function dbDeleteAllUserData(userId: string) {
     const { error: wErr } = await supabase.from("workouts").delete().eq("user_id", userId);
     if (wErr) throw wErr;
     await supabase.from("health_metrics").delete().eq("user_id", userId);
+    await supabase.from("user_profile").delete().eq("user_id", userId);
     return;
   }
   // SQLite — exercises cascade from workouts FK, but delete explicitly to be safe
@@ -281,6 +296,7 @@ async function dbDeleteAllUserData(userId: string) {
   }
   sqlite!.prepare("DELETE FROM workouts WHERE user_id = ?").run(userId);
   sqlite!.prepare("DELETE FROM health_metrics WHERE user_id = ?").run(userId);
+  sqlite!.prepare("DELETE FROM user_profile WHERE user_id = ?").run(userId);
 }
 
 // ─── Health metrics ──────────────────────────────────────────────────────────
@@ -352,6 +368,126 @@ async function dbGetHealthMetrics(userId: string, days: number) {
   return sqlite!.prepare(
     "SELECT * FROM health_metrics WHERE user_id = ? AND date >= ? ORDER BY date ASC"
   ).all(userId, cutoffStr);
+}
+
+// ─── User profile ────────────────────────────────────────────────────────────
+
+type UserProfileInput = {
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  avatarUrl?: string | null;
+  dob?: string | null;          // YYYY-MM-DD
+  sex?: string | null;          // 'male' | 'female' | 'other'
+  heightCm?: number | null;
+  weightKg?: number | null;
+};
+
+type UserProfileRow = {
+  user_id: string;
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  avatar_url: string | null;
+  dob: string | null;
+  sex: string | null;
+  height_cm: number | null;
+  weight_kg: number | null;
+  health_connected_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+async function dbGetUserProfile(userId: string): Promise<UserProfileRow | null> {
+  if (USE_SUPABASE && supabase) {
+    const { data, error } = await supabase.from("user_profile")
+      .select("*").eq("user_id", userId).maybeSingle();
+    if (error) throw error;
+    return (data as UserProfileRow) || null;
+  }
+  return (sqlite!.prepare("SELECT * FROM user_profile WHERE user_id = ?").get(userId) as UserProfileRow) || null;
+}
+
+async function dbUpsertUserProfile(userId: string, input: UserProfileInput): Promise<UserProfileRow> {
+  const now = new Date().toISOString();
+  // Only include fields the caller actually sent, so partial updates don't
+  // wipe existing values.
+  const patch: Record<string, any> = { user_id: userId, updated_at: now };
+  if (input.email !== undefined) patch.email = input.email;
+  if (input.firstName !== undefined) patch.first_name = input.firstName;
+  if (input.lastName !== undefined) patch.last_name = input.lastName;
+  if (input.avatarUrl !== undefined) patch.avatar_url = input.avatarUrl;
+  if (input.dob !== undefined) patch.dob = input.dob;
+  if (input.sex !== undefined) patch.sex = input.sex;
+  if (input.heightCm !== undefined) patch.height_cm = input.heightCm;
+  if (input.weightKg !== undefined) patch.weight_kg = input.weightKg;
+
+  if (USE_SUPABASE && supabase) {
+    // Check if row exists; if yes patch, else insert with created_at.
+    const { data: existing } = await supabase.from("user_profile")
+      .select("user_id").eq("user_id", userId).maybeSingle();
+    if (existing) {
+      const { error } = await (supabase.from("user_profile") as any)
+        .update(patch).eq("user_id", userId);
+      if (error) throw error;
+    } else {
+      const { error } = await (supabase.from("user_profile") as any)
+        .insert({ ...patch, created_at: now });
+      if (error) throw error;
+    }
+    const { data: row } = await supabase.from("user_profile")
+      .select("*").eq("user_id", userId).single();
+    return row as UserProfileRow;
+  }
+
+  const existing = sqlite!.prepare("SELECT user_id FROM user_profile WHERE user_id = ?").get(userId);
+  if (existing) {
+    const cols = Object.keys(patch).filter(k => k !== "user_id");
+    if (cols.length > 0) {
+      const setClause = cols.map(c => `${c} = ?`).join(", ");
+      sqlite!.prepare(`UPDATE user_profile SET ${setClause} WHERE user_id = ?`)
+        .run(...cols.map(c => patch[c]), userId);
+    }
+  } else {
+    const cols = Object.keys(patch);
+    const placeholders = cols.map(() => "?").join(", ");
+    const values = cols.map(c => patch[c]);
+    sqlite!.prepare(
+      `INSERT INTO user_profile (${cols.join(", ")}, created_at) VALUES (${placeholders}, ?)`
+    ).run(...values, now);
+  }
+  return sqlite!.prepare("SELECT * FROM user_profile WHERE user_id = ?").get(userId) as UserProfileRow;
+}
+
+async function dbMarkHealthConnected(userId: string, connected: boolean): Promise<void> {
+  const stamp = connected ? new Date().toISOString() : null;
+  if (USE_SUPABASE && supabase) {
+    const { data: existing } = await supabase.from("user_profile")
+      .select("user_id").eq("user_id", userId).maybeSingle();
+    if (existing) {
+      const { error } = await (supabase.from("user_profile") as any)
+        .update({ health_connected_at: stamp, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+      if (error) throw error;
+    } else {
+      const { error } = await (supabase.from("user_profile") as any).insert({
+        user_id: userId,
+        health_connected_at: stamp,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      if (error) throw error;
+    }
+    return;
+  }
+  const existing = sqlite!.prepare("SELECT user_id FROM user_profile WHERE user_id = ?").get(userId);
+  if (existing) {
+    sqlite!.prepare("UPDATE user_profile SET health_connected_at = ?, updated_at = datetime('now') WHERE user_id = ?")
+      .run(stamp, userId);
+  } else {
+    sqlite!.prepare("INSERT INTO user_profile (user_id, health_connected_at) VALUES (?, ?)")
+      .run(userId, stamp);
+  }
 }
 
 // ─── Server ───────────────────────────────────────────────────────────────────
@@ -946,6 +1082,38 @@ One exercise per block, blank line between exercises. Use **bold** for exercise 
     } catch (error: any) {
       console.error("Health summary error:", error);
       res.status(500).json({ error: error.message || "Failed to fetch health summary" });
+    }
+  });
+
+  // ── User profile ────────────────────────────────────────────────────────────
+  app.get("/api/user/profile", requireAuth, async (req: any, res) => {
+    try {
+      const row = await dbGetUserProfile(req.userId);
+      res.json(row);
+    } catch (error: any) {
+      console.error("User profile fetch error:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch profile" });
+    }
+  });
+
+  app.post("/api/user/profile", requireAuth, async (req: any, res) => {
+    try {
+      const row = await dbUpsertUserProfile(req.userId, req.body || {});
+      res.json(row);
+    } catch (error: any) {
+      console.error("User profile upsert error:", error);
+      res.status(500).json({ error: error.message || "Failed to save profile" });
+    }
+  });
+
+  app.post("/api/user/profile/health-connected", requireAuth, async (req: any, res) => {
+    try {
+      const connected = req.body?.connected !== false;
+      await dbMarkHealthConnected(req.userId, connected);
+      res.json({ success: true, connected });
+    } catch (error: any) {
+      console.error("Mark health connected error:", error);
+      res.status(500).json({ error: error.message || "Failed to update health connection" });
     }
   });
 
