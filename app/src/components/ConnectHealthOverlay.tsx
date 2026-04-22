@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FONT_LIGHT, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD } from '../utils/fonts';
 
 const APPLE_HEALTH_ICON = require('../../assets/apple-health-icon.png');
+const APP_BG = require('../../assets/bg.png');
 
 interface Props {
   onConnect: () => Promise<boolean> | void;
@@ -41,8 +42,13 @@ export function ConnectHealthOverlay({ onConnect, onDismiss, busy = false }: Pro
       style={[StyleSheet.absoluteFill, s.root, { opacity: fade }]}
       pointerEvents="auto"
     >
-      {/* Heavy blur + tint over the underlying dashboard */}
-      <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+      {/* Opaque base so the dashboard behind is hidden */}
+      <View style={[StyleSheet.absoluteFill, s.base]} />
+      {/* App's green-glow background image */}
+      <Image source={APP_BG} style={s.bgImage} resizeMode="cover" />
+      {/* Frost pass on top */}
+      <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+      {/* Faint tint so text always has contrast */}
       <View style={[StyleSheet.absoluteFill, s.darkWash]} />
 
       <Animated.View
@@ -104,7 +110,7 @@ export function ConnectHealthOverlay({ onConnect, onDismiss, busy = false }: Pro
         )}
 
         <Text style={[s.privacyNote, { fontFamily: FONT_LIGHT }]}>
-          LOFTE only reads the metrics you grant — never sells or shares your data.
+          LOFTE only reads the metrics you grant. We never sell or share your data.
         </Text>
       </Animated.View>
     </Animated.View>
@@ -128,8 +134,17 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     zIndex: 10,
   },
+  base: {
+    backgroundColor: '#050B14',
+  },
+  bgImage: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    width: '100%', height: '100%',
+    opacity: 0.40,
+  },
   darkWash: {
-    backgroundColor: 'rgba(5,11,20,0.55)',
+    backgroundColor: 'rgba(5,11,20,0.18)',
   },
   card: {
     width: '100%',
