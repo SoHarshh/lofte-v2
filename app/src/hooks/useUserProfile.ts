@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useUser } from '@clerk/expo';
 import { API_BASE } from '../config';
 import { useAuthFetch } from './useAuthFetch';
+import { subscribeHealthConnection } from '../utils/health';
 
 export type UserProfile = {
   user_id: string;
@@ -100,6 +101,17 @@ export function useUserProfile(): {
       setLoading(false);
     })();
   }, [isLoaded, isSignedIn, user?.id, authFetch]);
+
+  // Whenever Apple Health is connected/disconnected anywhere in the app,
+  // stamp `health_connected_at` on the user_profile row so the backend knows
+  // which users have real HealthKit data flowing.
+  useEffect(() => {
+    if (!isSignedIn) return;
+    const unsub = subscribeHealthConnection((connected) => {
+      markHealthConnected(connected);
+    });
+    return unsub;
+  }, [isSignedIn, markHealthConnected]);
 
   return { profile, loading, refresh, patch, markHealthConnected };
 }
