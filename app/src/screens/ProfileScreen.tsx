@@ -2,7 +2,7 @@ import React, { useCallback, useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, Platform, Image, Switch,
-  Modal, Alert, ActionSheetIOS, Pressable,
+  Modal, Alert, ActionSheetIOS, Pressable, Linking,
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
@@ -78,12 +78,20 @@ export default function ProfileScreen({ colors }: Props) {
     setHealthBusy(true);
     try {
       if (val) {
-        const granted = await connectHealth();
-        if (!granted) {
-          Alert.alert(
-            'Permission needed',
-            'Enable Apple Health access in Settings → Privacy → Health → LOFTE to connect.'
-          );
+        const r = await connectHealth();
+        if (!r.ok) {
+          if (r.reason === 'denied') {
+            Alert.alert(
+              'Apple Health access is off',
+              r.message,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Open Settings', onPress: () => Linking.openURL('x-apple-health://') },
+              ],
+            );
+          } else {
+            Alert.alert('Couldn\'t connect', r.message);
+          }
         }
       } else {
         await disconnectHealth();

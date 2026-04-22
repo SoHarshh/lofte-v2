@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useContext, createContext } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Animated, Easing, Platform, Dimensions,
+  Animated, Easing, Platform, Dimensions, Alert, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -590,7 +590,21 @@ export default function BiologyScreen(_: Props) {
     if (connecting) return;
     setConnecting(true);
     try {
-      await connect();
+      const r = await connect();
+      if (!r.ok) {
+        if (r.reason === 'denied') {
+          Alert.alert(
+            'Apple Health access is off',
+            r.message,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => Linking.openURL('x-apple-health://') },
+            ],
+          );
+        } else {
+          Alert.alert('Couldn\'t connect', r.message);
+        }
+      }
     } finally {
       setConnecting(false);
     }

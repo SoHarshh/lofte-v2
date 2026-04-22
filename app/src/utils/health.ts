@@ -1,19 +1,31 @@
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import { useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 
 let AppleHealthKit: any = null;
 let HealthConstants: any = null;
+let loadError: string | null = null;
 
 if (Platform.OS === 'ios') {
   try {
     const mod = require('react-native-health');
     AppleHealthKit = mod.default ?? mod;
     HealthConstants = AppleHealthKit?.Constants ?? null;
-  } catch {
+    if (typeof AppleHealthKit?.initHealthKit !== 'function') {
+      // Package loaded but native bridge is missing (e.g. running in Expo Go
+      // or a bundle that wasn't re-linked after adding react-native-health).
+      loadError = 'Native HealthKit bridge missing — this build does not include react-native-health.';
+      AppleHealthKit = null;
+    }
+  } catch (e: any) {
+    loadError = e?.message || 'react-native-health require failed';
     AppleHealthKit = null;
   }
 }
+
+// Expose the exact reason isHealthAvailable may be false. Helps the UI show
+// actionable errors instead of a silent no-op.
+export function getHealthLoadError(): string | null { return loadError; }
 
 const CONNECTED_KEY = 'health_connected';
 
@@ -61,7 +73,7 @@ export async function setHealthConnected(connected: boolean): Promise<void> {
 export function useHealthConnection(): {
   connected: boolean;
   ready: boolean;
-  connect: () => Promise<boolean>;
+  connect: () => Promise<PermissionResult>;
   disconnect: () => Promise<void>;
 } {
   const [connected, setConnected] = useState(false);
@@ -81,10 +93,7 @@ export function useHealthConnection(): {
   }, []);
 
   const connect = async () => {
-    const granted = await requestHealthPermissions();
-    // requestHealthPermissions already calls setHealthConnected(true) on
-    // success, which fires the listener above.
-    return granted;
+    return requestHealthPermissionsDetailed();
   };
 
   const disconnect = async () => {
@@ -118,19 +127,93 @@ function buildPermissions() {
   };
 }
 
-export function requestHealthPermissions(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (!isHealthAvailable()) return resolve(false);
-    const perms = buildPermissions();
-    if (!perms) return resolve(false);
+export type PermissionResult =
+  | { ok: true }
+  | { ok: false; reason: 'unavailable' | 'denied' | 'error'; message: string };
+
+// Detailed version used by the UI. Flips the SecureStore flag to true only
+// when HealthKit actually returned sharingAuthorized for a write type we need.
+// Per Apple docs: read-type authorization is hidden for privacy; only write
+// auth status is truthful. So the write-type check is the only reliable
+// "did the user actually approve us?" signal.
+export async function requestHealthPermissionsDetailed(): Promise<PermissionResult> {
+  if (Platform.OS !== 'ios') {
+    return { ok: false, reason: 'unavailable', message: 'Apple Health is only available on iOS.' };
+  }
+  if (!AppleHealthKit) {
+    return {
+      ok: false, reason: 'unavailable',
+      message: loadError || 'HealthKit native module is not available. Install the TestFlight build (Expo Go cannot access HealthKit).',
+    };
+  }
+  const perms = buildPermissions();
+  if (!perms) {
+    return { ok: false, reason: 'unavailable', message: 'HealthKit permission constants missing.' };
+  }
+
+  return new Promise<PermissionResult>((resolve) => {
+    let settled = false;
+    const done = (r: PermissionResult) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    // Safety net: if the native callback never fires (known edge case with
+    // react-native-health when the permission sheet is backgrounded), surface
+    // an error instead of hanging the UI forever.
+    const timer = setTimeout(() => {
+      console.warn('[health] initHealthKit timed out after 15s');
+      done({
+        ok: false, reason: 'error',
+        message: 'Health permission request timed out. Try closing the app and re-opening it.',
+      });
+    }, 15000);
+
     AppleHealthKit.initHealthKit(perms, (err: string) => {
+      clearTimeout(timer);
       if (err) {
-        resolve(false);
-      } else {
-        setHealthConnected(true).finally(() => resolve(true));
+        console.warn('[health] initHealthKit error:', err);
+        done({ ok: false, reason: 'error', message: err });
+        return;
       }
+
+      // HealthKit doesn't re-prompt on subsequent calls. If the user previously
+      // tapped "Don't Allow" on writes, we'll land here with no sheet shown.
+      // Check authorizationStatus for a write type to distinguish "approved"
+      // from "previously denied".
+      const P = HealthConstants.Permissions;
+      const checkWrite = (permission: any) => new Promise<number>((res) => {
+        if (typeof AppleHealthKit.getAuthStatus !== 'function') return res(2); // assume authorized on older package
+        AppleHealthKit.getAuthStatus(
+          { permissions: { write: [permission], read: [] } },
+          (_e: any, r: any) => {
+            // r.permissions.write is an array of ints: 0=notDetermined, 1=denied, 2=authorized
+            const v = r?.permissions?.write?.[0];
+            res(typeof v === 'number' ? v : 2);
+          },
+        );
+      });
+
+      Promise.all([checkWrite(P.Workout), checkWrite(P.ActiveEnergyBurned)]).then((statuses) => {
+        if (statuses.some((s) => s === 1)) {
+          done({
+            ok: false, reason: 'denied',
+            message: 'Open iOS Settings → Privacy & Security → Health → LOFTE and turn on the categories you want to share.',
+          });
+          return;
+        }
+        setHealthConnected(true).finally(() => done({ ok: true }));
+      }).catch(() => {
+        setHealthConnected(true).finally(() => done({ ok: true }));
+      });
     });
   });
+}
+
+// Legacy boolean wrapper kept for existing callers (SessionScreen, etc).
+export async function requestHealthPermissions(): Promise<boolean> {
+  const r = await requestHealthPermissionsDetailed();
+  return r.ok;
 }
 
 function todayRange() {
