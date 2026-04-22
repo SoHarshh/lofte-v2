@@ -61,15 +61,12 @@ export function ConnectHealthOverlay({ onConnect, onDismiss, busy = false }: Pro
           },
         ]}
       >
-        {/* Apple Health icon with a lock badge */}
+        {/* Apple Health icon */}
         <View style={s.iconWrap}>
           <Image source={APPLE_HEALTH_ICON} style={s.healthIcon} resizeMode="contain" />
-          <View style={s.lockBadge}>
-            <Ionicons name="lock-closed" size={11} color="#fff" />
-          </View>
         </View>
 
-        <Text style={[s.title, { fontFamily: FONT_MEDIUM }]}>Connect Apple Health</Text>
+        <Text style={[s.title, { fontFamily: FONT_MEDIUM }]}>Apple Health Not Connected</Text>
         <Text style={[s.blurb, { fontFamily: FONT_REGULAR }]}>
           Sync your data to unlock personalized metrics, activity rings, and deeper insights.
         </Text>
@@ -93,7 +90,7 @@ export function ConnectHealthOverlay({ onConnect, onDismiss, busy = false }: Pro
             <ActivityIndicator color="#050B14" />
           ) : (
             <>
-              <Text style={[s.ctaLabel, { fontFamily: FONT_SEMIBOLD }]}>Connect Apple Health</Text>
+              <Text style={[s.ctaLabel, { fontFamily: FONT_SEMIBOLD }]}>Connect</Text>
               <Ionicons name="arrow-forward" size={16} color="#050B14" style={{ marginLeft: 8 }} />
             </>
           )}
@@ -164,14 +161,6 @@ const s = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 22,
-  },
-  lockBadge: {
-    position: 'absolute',
-    right: -6, bottom: -6,
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center', justifyContent: 'center',
   },
   title: {
     color: '#fff',
