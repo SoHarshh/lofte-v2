@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 
 let AppleHealthKit: any = null;
@@ -34,8 +35,63 @@ export async function isHealthConnected(): Promise<boolean> {
   return v === 'true';
 }
 
+// Broadcast connection changes so any screen that cares (Biology overlay,
+// Profile toggle) stays in sync without polling.
+type ConnectionListener = (connected: boolean) => void;
+const connectionListeners = new Set<ConnectionListener>();
+
+function notifyConnectionChange(connected: boolean) {
+  connectionListeners.forEach((fn) => {
+    try { fn(connected); } catch {}
+  });
+}
+
+export function subscribeHealthConnection(fn: ConnectionListener): () => void {
+  connectionListeners.add(fn);
+  return () => { connectionListeners.delete(fn); };
+}
+
 export async function setHealthConnected(connected: boolean): Promise<void> {
   await SecureStore.setItemAsync(CONNECTED_KEY, connected ? 'true' : 'false');
+  notifyConnectionChange(connected);
+}
+
+// Live hook backed by SecureStore + pub/sub — reads once on mount, then
+// listens for any `setHealthConnected` / permission-grant elsewhere in the app.
+export function useHealthConnection(): {
+  connected: boolean;
+  ready: boolean;
+  connect: () => Promise<boolean>;
+  disconnect: () => Promise<void>;
+} {
+  const [connected, setConnected] = useState(false);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    isHealthConnected().then((v) => {
+      if (!mounted) return;
+      setConnected(v);
+      setReady(true);
+    });
+    const unsub = subscribeHealthConnection((v) => {
+      if (mounted) setConnected(v);
+    });
+    return () => { mounted = false; unsub(); };
+  }, []);
+
+  const connect = async () => {
+    const granted = await requestHealthPermissions();
+    // requestHealthPermissions already calls setHealthConnected(true) on
+    // success, which fires the listener above.
+    return granted;
+  };
+
+  const disconnect = async () => {
+    await setHealthConnected(false);
+  };
+
+  return { connected, ready, connect, disconnect };
 }
 
 function buildPermissions() {
