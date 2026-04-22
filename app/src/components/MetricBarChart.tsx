@@ -12,6 +12,7 @@ interface Props {
   colorActive?: string;
   colorIdle?: string;
   compact?: boolean; // shorter bars + smaller header for tight layouts
+  delay?: number; // ms to hold before the stagger begins
 }
 
 const SYSTEM = FONT_LIGHT;
@@ -23,6 +24,7 @@ export function MetricBarChart({
   colorActive = 'rgba(255,255,255,0.95)',
   colorIdle = 'rgba(255,255,255,0.18)',
   compact = false,
+  delay = 0,
 }: Props) {
   const barsMaxHeight = compact ? 90 : 160;
   const bigNumSize = compact ? 28 : 40;
@@ -73,6 +75,7 @@ export function MetricBarChart({
               onPress={() => setSelected(i)}
               index={i}
               maxHeight={barsMaxHeight}
+              delay={delay}
             />
           );
         })}
@@ -98,11 +101,11 @@ export function MetricBarChart({
 }
 
 function Bar({
-  pct, isSelected, isMax, isMin, showMarker, colorActive, colorIdle, onPress, index, maxHeight,
+  pct, isSelected, isMax, isMin, showMarker, colorActive, colorIdle, onPress, index, maxHeight, delay = 0,
 }: {
   pct: number; isSelected: boolean; isMax: boolean; isMin: boolean;
   showMarker: boolean; colorActive: string; colorIdle: string;
-  onPress: () => void; index: number; maxHeight: number;
+  onPress: () => void; index: number; maxHeight: number; delay?: number;
 }) {
   const scale = useRef(new Animated.Value(0)).current;
 
@@ -111,7 +114,7 @@ function Bar({
     Animated.timing(scale, {
       toValue: 1,
       duration: 520,
-      delay: index * 22,
+      delay: delay + index * 22,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();

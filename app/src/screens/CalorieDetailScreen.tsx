@@ -255,6 +255,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
                 stroke={10}
                 color={ringColor}
                 gradientKey="calRing"
+                delay={260}
               >
                 <View style={{ alignItems: 'center' }}>
                   <CountUp
@@ -324,7 +325,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
             </View>
             <View key={period}>
               {seriesHasData ? (
-                <MetricBarChart data={seriesData} unit="kcal" compact />
+                <MetricBarChart data={seriesData} unit="kcal" compact delay={420} />
               ) : (
                 <View style={s.chartEmpty}>
                   <Text style={s.chartEmptyText}>No sessions logged yet</Text>

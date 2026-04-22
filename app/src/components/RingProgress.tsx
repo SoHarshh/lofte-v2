@@ -13,6 +13,7 @@ interface Props {
   children?: React.ReactNode;
   gradientKey?: string;
   animate?: boolean; // false → render at final value with no sweep
+  delay?: number; // ms to hold at 0 before sweeping
 }
 
 // Activity-ring style: sweeping stroke with a soft halo shadow. Matches the
@@ -26,6 +27,7 @@ export function RingProgress({
   children,
   gradientKey = 'rp',
   animate = true,
+  delay = 0,
 }: Props) {
   const r = (size - stroke) / 2;
   const circumference = 2 * Math.PI * r;
@@ -38,10 +40,11 @@ export function RingProgress({
     Animated.timing(anim, {
       toValue: clamped,
       duration: 1100,
+      delay,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start();
-  }, [clamped, animate]);
+  }, [clamped, animate, delay]);
 
   const strokeDashoffset = anim.interpolate({
     inputRange: [0, 1],
