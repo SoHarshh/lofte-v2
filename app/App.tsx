@@ -34,6 +34,7 @@ import CalorieDetailScreen from './src/screens/CalorieDetailScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import BiologyScreen from './src/screens/BiologyScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import { useUserProfile } from './src/hooks/useUserProfile';
 
 const CLERK_KEY =
   process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
@@ -182,6 +183,22 @@ function MainApp() {
     return <LoginScreen />;
   }
 
+  return (
+    <>
+      <ProfileSync />
+      <NavigationContainerInner session={session} startSession={startSession} endSession={endSession} updateSession={updateSession} />
+    </>
+  );
+}
+
+// Mounts `useUserProfile` once signed in so the backend row stays synced with
+// the current Clerk user (email, name, avatar).
+function ProfileSync() {
+  useUserProfile();
+  return null;
+}
+
+function NavigationContainerInner({ session, startSession, endSession, updateSession }: any) {
   return (
     <NavigationContainer>
       <Tab.Navigator
