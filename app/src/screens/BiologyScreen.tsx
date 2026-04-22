@@ -11,12 +11,13 @@ import { RingProgress } from '../components/RingProgress';
 import { MetricBarChart } from '../components/MetricBarChart';
 import { MetricLineChart } from '../components/MetricLineChart';
 import { DailyPagedChart } from '../components/DailyPagedChart';
+import { ConnectHealthOverlay } from '../components/ConnectHealthOverlay';
 import {
   HEALTH_METRICS,
   MetricKey, MetricConfig, Period,
 } from '../data/healthMetrics';
 import {
-  isHealthAvailable, isHealthConnected, requestHealthPermissions,
+  isHealthAvailable, useHealthConnection,
 } from '../utils/health';
 import { useHealthDay } from '../hooks/useHealthDay';
 import { useMetricSeries, Period as SeriesPeriod } from '../hooks/useMetricSeries';
@@ -577,6 +578,23 @@ function HealthHome({ onOpen }: { onOpen: (k: MetricKey) => void }) {
 export default function BiologyScreen(_: Props) {
   const [activeMetric, setActiveMetric] = useState<MetricKey | null>(null);
   const slide = useRef(new Animated.Value(0)).current; // 0 = home, 1 = detail
+  const { connected, ready, connect } = useHealthConnection();
+  const [connecting, setConnecting] = useState(false);
+  const healthSupported = isHealthAvailable();
+  // Only show the overlay when the platform supports HealthKit AND the user
+  // hasn't granted permissions yet. On Android/simulator we silently keep the
+  // dashboard visible (which will render empty states).
+  const showConnectOverlay = ready && healthSupported && !connected;
+
+  const onConnectPress = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      await connect();
+    } finally {
+      setConnecting(false);
+    }
+  };
 
   const open = (k: MetricKey) => {
     setActiveMetric(k);
@@ -635,6 +653,11 @@ export default function BiologyScreen(_: Props) {
         >
           <MetricDetail config={HEALTH_METRICS[activeMetric]} onBack={back} />
         </Animated.View>
+      )}
+
+      {/* Connect-Apple-Health overlay (covers both home + detail layers) */}
+      {showConnectOverlay && (
+        <ConnectHealthOverlay onConnect={onConnectPress} busy={connecting} />
       )}
     </View>
   );
