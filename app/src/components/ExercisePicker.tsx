@@ -83,6 +83,7 @@ export function ExercisePicker({ visible, onSelect, onClose }: Props) {
             horizontal
             showsHorizontalScrollIndicator={false}
             keyExtractor={item => item}
+            style={s.pillList}
             contentContainerStyle={s.pillRow}
             ItemSeparatorComponent={() => <View style={s.pillSpacer} />}
             renderItem={({ item }) => {
@@ -148,7 +149,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     overflow: 'hidden',
-    maxHeight: '90%',
+    height: '85%',
   },
   handle: {
     width: 36, height: 4, borderRadius: 2,
@@ -168,18 +169,27 @@ const s = StyleSheet.create({
   searchInput: {
     flex: 1, fontSize: 15, color: '#fff',
   },
-  pillRow: {
-    paddingHorizontal: 16, paddingBottom: 12, paddingVertical: 4,
+  pillList: {
+    flexGrow: 0,
+    maxHeight: 44,
+    marginBottom: 12,
     zIndex: 1,
+  },
+  pillRow: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
   },
   pillSpacer: {
     width: 8,
   },
   pill: {
-    paddingHorizontal: 14, paddingVertical: 8,
+    height: 32,
+    paddingHorizontal: 14,
     borderRadius: 100, borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pillActive: {
     backgroundColor: '#fff',
@@ -189,13 +199,15 @@ const s = StyleSheet.create({
     fontSize: 11, fontWeight: '600',
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    lineHeight: 14,
+    lineHeight: 16,
+    includeFontPadding: false,
+    textAlignVertical: 'center',
     color: 'rgba(255,255,255,0.55)',
   },
   pillTextActive: {
     color: '#050B14',
   },
-  list: { zIndex: 1 },
+  list: { zIndex: 1, flex: 1 },
   row: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 20, paddingVertical: 14,

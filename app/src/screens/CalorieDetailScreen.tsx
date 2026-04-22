@@ -33,7 +33,7 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 
 // Build the chart series from workout logs only.
 function buildSeries(workouts: Workout[], period: Period, anchor: Date) {
-  const end = startOfDay(anchor);
+  const end = anchor;
   // Daily bucket first
   const dailyMap = new Map<string, number>();
   workouts.forEach((w) => {
@@ -44,10 +44,10 @@ function buildSeries(workouts: Workout[], period: Period, anchor: Date) {
   if (period === 'W') {
     const points: { label: string; value: number }[] = [];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(end); d.setDate(end.getDate() - i);
+      const d = new Date(end); d.setUTCDate(end.getUTCDate() - i);
       const key = d.toISOString().slice(0, 10);
       points.push({
-        label: WEEK_LABELS[(d.getDay() + 6) % 7],
+        label: WEEK_LABELS[(d.getUTCDay() + 6) % 7],
         value: Math.round(dailyMap.get(key) || 0),
       });
     }
@@ -58,7 +58,7 @@ function buildSeries(workouts: Workout[], period: Period, anchor: Date) {
     // 4 weekly buckets, each summed over 7 days
     const weeks: number[] = [0, 0, 0, 0];
     for (let i = 0; i < 28; i++) {
-      const d = new Date(end); d.setDate(end.getDate() - i);
+      const d = new Date(end); d.setUTCDate(end.getUTCDate() - i);
       const key = d.toISOString().slice(0, 10);
       const bucket = 3 - Math.floor(i / 7); // bucket 0 = oldest, 3 = this week
       if (bucket >= 0 && bucket < 4) {
@@ -72,12 +72,12 @@ function buildSeries(workouts: Workout[], period: Period, anchor: Date) {
   const months: { label: string; value: number }[] = [];
   for (let i = 11; i >= 0; i--) {
     const d = new Date(end);
-    d.setMonth(d.getMonth() - i, 1);
-    months.push({ label: MONTH_LABELS[d.getMonth()], value: 0 });
+    d.setUTCMonth(d.getUTCMonth() - i, 1);
+    months.push({ label: MONTH_LABELS[d.getUTCMonth()], value: 0 });
   }
   workouts.forEach((w) => {
     const d = new Date(w.date);
-    const idx = 11 - ((end.getFullYear() - d.getFullYear()) * 12 + (end.getMonth() - d.getMonth()));
+    const idx = 11 - ((end.getUTCFullYear() - d.getUTCFullYear()) * 12 + (end.getUTCMonth() - d.getUTCMonth()));
     if (idx >= 0 && idx < 12) {
       months[idx].value += workoutCalories(w);
     }
@@ -154,7 +154,11 @@ export default function CalorieDetailScreen({ colors }: Props) {
   const navigation = useNavigation();
   const authFetch = useAuthFetch();
 
-  const today = useMemo(() => startOfDay(new Date()), []);
+  // Anchor at UTC-midnight so date keys line up with how workouts are stored.
+  const today = useMemo(() => {
+    const n = new Date();
+    return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+  }, []);
 
   useEffect(() => {
     SecureStore.getItemAsync('calorie_goal').then(v => { if (v) { setGoal(parseInt(v)); setGoalInput(v); } });
@@ -181,7 +185,6 @@ export default function CalorieDetailScreen({ colors }: Props) {
     SecureStore.setItemAsync('calorie_goal', String(val));
   };
 
-  // Today's workout calories
   const todayKey = today.toISOString().slice(0, 10);
   const todayCal = useMemo(() => Math.round(
     workouts
@@ -193,7 +196,7 @@ export default function CalorieDetailScreen({ colors }: Props) {
   const weekAvg = useMemo(() => {
     let sum = 0, days = 0;
     for (let i = 1; i <= 7; i++) {
-      const d = new Date(today); d.setDate(today.getDate() - i);
+      const d = new Date(today); d.setUTCDate(today.getUTCDate() - i);
       const key = d.toISOString().slice(0, 10);
       const cal = workouts
         .filter(w => w.date.slice(0, 10) === key)

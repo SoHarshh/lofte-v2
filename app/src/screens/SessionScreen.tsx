@@ -12,7 +12,7 @@ import { useAuth } from '@clerk/expo';
 import { useAudioRecorder, AudioModule, RecordingPresets } from 'expo-audio';
 import * as ImagePicker from 'expo-image-picker';
 import { File } from 'expo-file-system';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
@@ -516,8 +516,11 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
     return '—';
   };
 
-  const methodIcon = (m: string): keyof typeof Ionicons.glyphMap =>
-    m === 'voice' ? 'mic' : m === 'camera' ? 'camera' : 'pencil';
+  const MethodIcon = ({ method, size, color }: { method: string; size: number; color: string }) => {
+    if (method === 'voice') return <Ionicons name="mic" size={size} color={color} />;
+    if (method === 'camera') return <Ionicons name="camera" size={size} color={color} />;
+    return <MaterialCommunityIcons name="keyboard-outline" size={size} color={color} />;
+  };
 
   const overloadHint = (() => {
     for (const entry of [...session.transcript].reverse()) {
@@ -624,7 +627,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
               <View key={entry.id} style={s.entry}>
                 <BlurView intensity={38} tint="dark" style={StyleSheet.absoluteFill} />
                 <View style={s.entryIcon}>
-                  <Ionicons name={methodIcon(entry.method)} size={15} color="rgba(255,255,255,0.70)" />
+                  <MethodIcon method={entry.method} size={15} color="rgba(255,255,255,0.70)" />
                 </View>
                 <View style={s.entryBody}>
                   {entry.pending ? (
@@ -811,9 +814,9 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
             onPress={() => setShowManualEntry(!showManualEntry)}
             activeOpacity={0.75}
           >
-            <Ionicons
-              name="pencil"
-              size={20}
+            <MaterialCommunityIcons
+              name="keyboard-outline"
+              size={22}
               color={showManualEntry ? '#050B14' : 'rgba(255,255,255,0.65)'}
             />
           </TouchableOpacity>
