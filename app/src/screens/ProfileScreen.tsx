@@ -15,10 +15,7 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
-import {
-  isHealthAvailable, isHealthConnected, setHealthConnected,
-  requestHealthPermissions,
-} from '../utils/health';
+import { isHealthAvailable, useHealthConnection } from '../utils/health';
 
 import { FONT_SEMIBOLD } from '../utils/fonts';
 const SYSTEM = FONT_SEMIBOLD;
@@ -55,7 +52,7 @@ export default function ProfileScreen({ colors }: Props) {
   const [useKg, setUseKg] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [healthOn, setHealthOn] = useState(false);
+  const { connected: healthOn, connect: connectHealth, disconnect: disconnectHealth } = useHealthConnection();
   const [healthBusy, setHealthBusy] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const insets = useSafeAreaInsets();
@@ -65,7 +62,6 @@ export default function ProfileScreen({ colors }: Props) {
 
   useEffect(() => {
     SecureStore.getItemAsync('units_kg').then(v => { if (v === 'true') setUseKg(true); });
-    isHealthConnected().then(setHealthOn);
   }, []);
 
   const toggleUnits = (val: boolean) => {
@@ -82,19 +78,15 @@ export default function ProfileScreen({ colors }: Props) {
     setHealthBusy(true);
     try {
       if (val) {
-        const granted = await requestHealthPermissions();
-        if (granted) {
-          setHealthOn(true);
-        } else {
+        const granted = await connectHealth();
+        if (!granted) {
           Alert.alert(
             'Permission needed',
             'Enable Apple Health access in Settings → Privacy → Health → LOFTE to connect.'
           );
-          setHealthOn(false);
         }
       } else {
-        await setHealthConnected(false);
-        setHealthOn(false);
+        await disconnectHealth();
       }
     } finally {
       setHealthBusy(false);
