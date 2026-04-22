@@ -255,12 +255,6 @@ export default function ProfileScreen({ colors }: Props) {
               ? <Image source={{ uri: avatarUrl }} style={StyleSheet.absoluteFillObject} />
               : <Text style={[s.avatarInitials, { fontFamily: SYSTEM }]}>{initials}</Text>
             }
-            {/* Camera overlay badge — indicates tap-to-change */}
-            {!avatarUploading && (
-              <View style={s.avatarBadge}>
-                <Ionicons name="camera" size={12} color="#050B14" />
-              </View>
-            )}
             {avatarUploading && (
               <View style={s.avatarOverlay}>
                 <ActivityIndicator color="#fff" />
@@ -460,15 +454,6 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.28)',
   },
   avatarInitials: { fontSize: 34, fontWeight: '400', color: '#fff' },
-  avatarBadge: {
-    position: 'absolute',
-    bottom: 0, right: 0,
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#fff',
-    borderWidth: 2, borderColor: '#050B14',
-    alignItems: 'center', justifyContent: 'center',
-    zIndex: 2,
-  },
   avatarOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(5,11,20,0.55)',
