@@ -12,7 +12,7 @@ const APPLE_HEALTH_ICON = require('../../assets/apple-health-icon.png');
 const APP_BG = require('../../assets/bg.png');
 
 interface Props {
-  onConnect: () => Promise<boolean> | void;
+  onConnect: () => void | Promise<unknown>;
   onDismiss?: () => void;
   busy?: boolean;
 }

@@ -918,17 +918,45 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
       try { history = await dbGetNyxHistory(req.userId, 30); } catch {}
       const hasHistory = history.length > 0;
 
-      // ── Pull Apple Health metrics (last 7 days) ──
+      // ── Pull user profile so Nyx knows who they are ──
+      let profileBlock = '';
+      let preferredName: string | null = null;
+      try {
+        const profile = await dbGetUserProfile(req.userId);
+        if (profile) {
+          const displayName = [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim();
+          preferredName = profile.first_name || displayName || null;
+          const ageYrs = profile.dob ? Math.floor((Date.now() - new Date(profile.dob).getTime()) / (365.25 * 86_400_000)) : null;
+          const lines = [
+            displayName && `Name: ${displayName}`,
+            profile.email && `Email: ${profile.email}`,
+            ageYrs != null && `Age: ${ageYrs}y`,
+            profile.sex && `Sex: ${profile.sex}`,
+            profile.height_cm != null && `Height: ${profile.height_cm}cm`,
+            profile.weight_kg != null && `Weight: ${profile.weight_kg}kg`,
+            profile.health_connected_at && `Apple Health connected since: ${profile.health_connected_at.slice(0, 10)}`,
+          ].filter(Boolean);
+          if (lines.length > 0) profileBlock = `\nATHLETE PROFILE:\n${lines.join('\n')}`;
+        }
+      } catch {}
+
+      // ── Pull Apple Health metrics (last 14 days for richer trend context) ──
       let healthBlock = '';
       try {
-        const metrics = await dbGetHealthMetrics(req.userId, 7) as any[];
+        const metrics = await dbGetHealthMetrics(req.userId, 14) as any[];
         if (metrics.length > 0) {
           const today = now.toISOString().slice(0, 10);
           const todayRow = metrics.find((r: any) => String(r.date).slice(0, 10) === today);
+          const last7 = metrics.slice(-7);
+          const prior7 = metrics.slice(0, Math.max(0, metrics.length - 7));
 
-          const avg = (key: string) => {
-            const vals = metrics.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+          const avgOf = (rows: any[], key: string) => {
+            const vals = rows.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
             return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : null;
+          };
+          const sumOf = (rows: any[], key: string) => {
+            const vals = rows.map((r: any) => r[key]).filter((v: any) => typeof v === 'number');
+            return vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) : null;
           };
           const fmt = (n: number | null, d = 0) => n == null ? '—' : n.toFixed(d);
           const trend = (cur: number | null, base: number | null) => {
@@ -937,20 +965,34 @@ Rules: Be specific. Mention PRs if present. End with one actionable tip. No fill
             if (Math.abs(diff) < base * 0.03) return ' (stable)';
             return diff > 0 ? ` (↑ from 7d avg ${base.toFixed(0)})` : ` (↓ from 7d avg ${base.toFixed(0)})`;
           };
+          const weekOverWeek = (cur: number | null, prev: number | null, unit = '') => {
+            if (cur == null || prev == null || prev === 0) return '';
+            const delta = ((cur - prev) / prev) * 100;
+            const sign = delta >= 0 ? '+' : '';
+            return ` (${sign}${delta.toFixed(1)}% vs prior week${unit ? ' ' + unit : ''})`;
+          };
 
-          const hrv7 = avg('hrv_ms');
-          const rhr7 = avg('resting_heart_rate');
-          const sleep7 = avg('sleep_hours');
-          const steps7 = avg('steps');
-          const cal7 = avg('active_energy_kcal');
+          const hrv7 = avgOf(last7, 'hrv_ms');
+          const rhr7 = avgOf(last7, 'resting_heart_rate');
+          const sleep7 = avgOf(last7, 'sleep_hours');
+          const steps7 = avgOf(last7, 'steps');
+          const cal7 = avgOf(last7, 'active_energy_kcal');
+          const weight_latest = [...metrics].reverse().find((r: any) => typeof r.body_weight_kg === 'number')?.body_weight_kg ?? null;
+
+          const hrvPrev = avgOf(prior7, 'hrv_ms');
+          const rhrPrev = avgOf(prior7, 'resting_heart_rate');
+          const sleepPrev = avgOf(prior7, 'sleep_hours');
 
           healthBlock = `
-RECOVERY & BODY (from Apple Health):
+RECOVERY & BODY (live Apple Health, last 14 days):
 HRV today: ${fmt(todayRow?.hrv_ms, 0)}ms${trend(todayRow?.hrv_ms ?? null, hrv7)}
+HRV 7d avg: ${fmt(hrv7, 0)}ms${weekOverWeek(hrv7, hrvPrev)}
 Resting HR today: ${fmt(todayRow?.resting_heart_rate, 0)}bpm${trend(todayRow?.resting_heart_rate ?? null, rhr7)}
-Sleep last night: ${fmt(todayRow?.sleep_hours, 1)}h (7d avg ${fmt(sleep7, 1)}h)
-Steps today: ${fmt(todayRow?.steps, 0)} (7d avg ${fmt(steps7, 0)})
-Active cal today: ${fmt(todayRow?.active_energy_kcal, 0)} (7d avg ${fmt(cal7, 0)})`;
+Resting HR 7d avg: ${fmt(rhr7, 0)}bpm${weekOverWeek(rhr7, rhrPrev)}
+Sleep last night: ${fmt(todayRow?.sleep_hours, 1)}h (7d avg ${fmt(sleep7, 1)}h${weekOverWeek(sleep7, sleepPrev)})
+Steps today: ${fmt(todayRow?.steps, 0)} (7d avg ${fmt(steps7, 0)}, 7d total ${fmt(sumOf(last7, 'steps'), 0)})
+Active cal today: ${fmt(todayRow?.active_energy_kcal, 0)} (7d avg ${fmt(cal7, 0)})
+Latest body weight: ${fmt(weight_latest, 1)}kg`;
         }
       } catch {}
 
@@ -971,13 +1013,13 @@ ${isNewUser && !hasHistory ? `This is a brand new athlete with no data and no pa
 
 IMPORTANT — past context is not permanent truth. If the athlete previously mentioned an injury, limitation, or preference, don't silently assume it still applies. Briefly check in: "Last time you mentioned your lower back — how's that doing?" or "Still working around that shoulder?" Let them confirm before programming around it. People heal, situations change. A good coach verifies, not assumes.`}
 
-${!isNewUser ? `
+${profileBlock}${!isNewUser ? `
 THEIR DATA:
 ${allWorkouts.length} total sessions, ${recent90.length} in last 90 days, ${thisWeek.length} this week. Streak: ${streak}d. Last workout: ${daysSinceLast ?? '?'}d ago.
 PRs: ${prLines}
 Muscles (30d): ${muscleLines}
 Volume (4wk): ${volTrend}
-Recent: ${recentLines || 'None.'}${hrBlock}${healthBlock}` : ''}
+Recent: ${recentLines || 'None.'}${hrBlock}${healthBlock}` : healthBlock}
 
 RULES:
 - 2-3 sentences for quick answers. Keep conversations casual and short.
@@ -989,6 +1031,8 @@ RULES:
 - If HRV is trending down, resting HR is up, or sleep is short — factor that into training advice. Suggest lighter sessions, mobility, or a rest day instead of pushing intensity. Don't be silent about recovery signals.
 - If steps and active cal outside the gym are high, acknowledge the cumulative load. Strength numbers will feel heavy on high-cardio days.
 - Never invent health numbers. Only reference the Apple Health values shown above. If a value is "—", treat it as unavailable.
+- Use the athlete's first name (from ATHLETE PROFILE) when natural — never sound generic. If age / height / weight / sex are available, factor them in (e.g. cardio targets, intake estimates, programming). Don't list those details back to them unless asked.
+- Always prefer concrete numbers from the data over vague generalities. "Your HRV is down 14% vs last week" beats "your recovery might be off."
 
 FORMATTING:
 - For regular chat: plain text, no formatting. Write like you're texting.
