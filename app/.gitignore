@@ -37,5 +37,14 @@ yarn-error.*
 *.tsbuildinfo
 
 # generated native folders
-/ios
+# /ios temporarily tracked so the iOS build ships with correct Info.plist
+# (HealthKit purpose strings baked in). Restore the ignore after App Store
+# Connect accepts the next build.
+# /ios
 /android
+ios/Pods
+ios/build
+ios/DerivedData
+ios/.xcode.env.local
+ios/**/xcuserdata
+ios/**/xcshareddata/WorkspaceSettings.xcsettings
