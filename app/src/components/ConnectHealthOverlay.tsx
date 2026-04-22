@@ -1,13 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, Pressable, ActivityIndicator,
-  Animated, Easing, StatusBar,
+  Animated, Easing, Image,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Defs, LinearGradient, Stop, Rect, Path } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FONT_LIGHT, FONT_MEDIUM, FONT_REGULAR, FONT_SEMIBOLD } from '../utils/fonts';
+
+const APPLE_HEALTH_ICON = require('../../assets/apple-health-icon.png');
 
 interface Props {
   onConnect: () => Promise<boolean> | void;
@@ -54,9 +55,9 @@ export function ConnectHealthOverlay({ onConnect, onDismiss, busy = false }: Pro
           },
         ]}
       >
-        {/* Apple Health–style icon: pink/red gradient tile with a white heart */}
+        {/* Apple Health icon with a lock badge */}
         <View style={s.iconWrap}>
-          <HealthTile size={88} />
+          <Image source={APPLE_HEALTH_ICON} style={s.healthIcon} resizeMode="contain" />
           <View style={s.lockBadge}>
             <Ionicons name="lock-closed" size={11} color="#fff" />
           </View>
@@ -121,58 +122,6 @@ function Perk({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: st
   );
 }
 
-// A faithful nod to the Apple Health icon — a white heart on a vertical
-// pink→red gradient tile — without shipping Apple's actual asset.
-function HealthTile({ size = 88 }: { size?: number }) {
-  const r = Math.round(size * 0.26);
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: r,
-        overflow: 'hidden',
-        shadowColor: '#F43F5E',
-        shadowOpacity: 0.45,
-        shadowRadius: 24,
-        shadowOffset: { width: 0, height: 12 },
-      }}
-    >
-      <Svg width={size} height={size}>
-        <Defs>
-          <LinearGradient id="hg" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor="#FB7185" />
-            <Stop offset="1" stopColor="#E11D48" />
-          </LinearGradient>
-        </Defs>
-        <Rect x={0} y={0} width={size} height={size} rx={r} ry={r} fill="url(#hg)" />
-        {/* Heart — two overlapping circles + a triangle bottom. Simplified path. */}
-        <Path
-          fill="#ffffff"
-          d={(() => {
-            // Scale a heart into the tile. Center around size/2.
-            const cx = size / 2;
-            const cy = size / 2 + size * 0.04;
-            const w = size * 0.52;
-            const h = size * 0.46;
-            // Cubic bezier heart path.
-            const x = cx - w / 2;
-            const y = cy - h / 2;
-            return [
-              `M${cx} ${y + h}`,
-              `C${x} ${y + h * 0.55} ${x} ${y + h * 0.15} ${cx - w * 0.25} ${y + h * 0.02}`,
-              `C${cx - w * 0.08} ${y - h * 0.06} ${cx} ${y + h * 0.1} ${cx} ${y + h * 0.22}`,
-              `C${cx} ${y + h * 0.1} ${cx + w * 0.08} ${y - h * 0.06} ${cx + w * 0.25} ${y + h * 0.02}`,
-              `C${x + w} ${y + h * 0.15} ${x + w} ${y + h * 0.55} ${cx} ${y + h}`,
-              `Z`,
-            ].join(' ');
-          })()}
-        />
-      </Svg>
-    </View>
-  );
-}
-
 const s = StyleSheet.create({
   root: {
     alignItems: 'center',
@@ -191,6 +140,15 @@ const s = StyleSheet.create({
   iconWrap: {
     marginBottom: 22,
     position: 'relative',
+    shadowColor: '#F43F5E',
+    shadowOpacity: 0.35,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  healthIcon: {
+    width: 88,
+    height: 88,
+    borderRadius: 22,
   },
   lockBadge: {
     position: 'absolute',
