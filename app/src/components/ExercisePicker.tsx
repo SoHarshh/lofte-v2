@@ -176,7 +176,7 @@ const s = StyleSheet.create({
     width: 8,
   },
   pill: {
-    paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: 100, borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.05)',
@@ -186,7 +186,10 @@ const s = StyleSheet.create({
     borderColor: '#fff',
   },
   pillText: {
-    fontSize: 12, fontWeight: '600',
+    fontSize: 11, fontWeight: '600',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    lineHeight: 14,
     color: 'rgba(255,255,255,0.55)',
   },
   pillTextActive: {
