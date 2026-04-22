@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { fetchDailyRange, MetricName, isHealthAvailable } from '../utils/health';
+import {
+  fetchDailyRange, MetricName, isHealthAvailable, useHealthConnection,
+} from '../utils/health';
 
 export type SeriesPoint = { label: string; value: number };
 
@@ -38,6 +40,7 @@ export function useMetricSeries(
   period: Period,
   anchor: Date,
 ): { loading: boolean; data: SeriesPoint[] } {
+  const { connected } = useHealthConnection();
   const [state, setState] = useState<{ loading: boolean; data: SeriesPoint[] }>({
     loading: true,
     data: [],
@@ -113,7 +116,7 @@ export function useMetricSeries(
       if (!cancelled) setState({ loading: false, data: [] });
     });
     return () => { cancelled = true; };
-  }, [metric, period, anchor.toDateString()]);
+  }, [metric, period, anchor.toDateString(), connected]);
 
   return state;
 }

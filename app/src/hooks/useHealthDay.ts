@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   HealthMetrics,
   fetchDayMetrics, fetchHourlyHRV, fetchHourlyHR, fetchDailyRange,
-  isHealthAvailable,
+  isHealthAvailable, useHealthConnection,
 } from '../utils/health';
 
 export type HealthDayState = {
@@ -31,6 +31,7 @@ function subDays(d: Date, n: number): Date {
 // numbers, hourly HRV + HR curves, and a day-over-day HRV delta computed from
 // real HealthKit data.
 export function useHealthDay(date: Date): HealthDayState {
+  const { connected } = useHealthConnection();
   const [state, setState] = useState<HealthDayState>({
     loading: true,
     connected: isHealthAvailable(),
@@ -85,7 +86,7 @@ export function useHealthDay(date: Date): HealthDayState {
       }
     });
     return () => { cancelled = true; };
-  }, [date.toDateString()]);
+  }, [date.toDateString(), connected]);
 
   return state;
 }

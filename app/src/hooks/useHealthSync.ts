@@ -4,7 +4,7 @@ import { API_BASE } from '../config';
 import { useAuthFetch } from './useAuthFetch';
 import {
   isHealthAvailable, isHealthConnected, getTodayMetrics, fetchDayMetrics,
-  HealthMetrics,
+  subscribeHealthConnection, HealthMetrics,
 } from '../utils/health';
 
 type SyncState = {
@@ -68,7 +68,10 @@ export function useHealthSync(): SyncState {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') refresh();
     });
-    return () => sub.remove();
+    // Re-sync the moment the user connects (or disconnects) Apple Health
+    // anywhere else in the app.
+    const unsubConn = subscribeHealthConnection(() => { refresh(); });
+    return () => { sub.remove(); unsubConn(); };
   }, [refresh]);
 
   return { connected, loading, metrics, lastSyncedAt, refresh };
