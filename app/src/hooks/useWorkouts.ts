@@ -1,35 +1,40 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@clerk/expo';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from './useAuthFetch';
 import { readCache, writeCache } from '../utils/cache';
 
-// Module-level in-memory mirror so the second screen (History) that mounts
-// after Dashboard doesn't even need to hit SecureStore — it reads from memory
-// and renders with zero frames of empty state.
+// Module-level state so:
+//  - Multiple screens (Dashboard + History) share the same list instantly
+//  - A second screen that mounts right after the first doesn't re-fetch
+//  - Concurrent reloads are deduped to a single in-flight request
 let memoryCache: Workout[] | null = null;
 let memoryCacheUserId: string | null = null;
+let inFlight: Promise<void> | null = null;
+let lastFetchAt = 0;
 
-export function useWorkouts(): {
+export type UseWorkoutsResult = {
   workouts: Workout[];
-  loading: boolean;
+  /** True only during the very first fetch when we have no cache at all. */
+  initializing: boolean;
   reload: () => Promise<void>;
-} {
+};
+
+const STALE_MS = 10_000; // don't re-fetch more often than this on focus
+
+export function useWorkouts(): UseWorkoutsResult {
   const { userId } = useAuth();
   const authFetch = useAuthFetch();
 
-  // If the in-memory mirror matches this user, start fully hydrated — no
-  // loading flash, not even a SecureStore round-trip.
+  // Seed state from the module cache if present → zero-flash render.
   const initial = memoryCacheUserId === (userId ?? null) && memoryCache ? memoryCache : null;
   const [workouts, setWorkouts] = useState<Workout[]>(initial ?? []);
-  const [loading, setLoading] = useState(initial == null);
-  const hydrated = useRef(initial != null);
+  const [initializing, setInitializing] = useState(initial == null && memoryCache == null);
 
-  // Step 1 — hydrate from SecureStore on mount if the in-memory mirror is
-  // empty (first screen to mount this JS session).
+  // Hydrate from SecureStore if the module cache is cold.
   useEffect(() => {
-    if (hydrated.current) return;
+    if (memoryCache != null) return;
     let cancelled = false;
     readCache<Workout[]>(userId, 'workouts').then((cached) => {
       if (cancelled) return;
@@ -37,27 +42,22 @@ export function useWorkouts(): {
         memoryCache = cached;
         memoryCacheUserId = userId ?? null;
         setWorkouts(cached);
-        setLoading(false);
-        hydrated.current = true;
       }
+      setInitializing(false);
     });
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Step 2 — always refetch in the background. If cache hit already happened,
-  // this quietly replaces state with fresh data. Otherwise it's the first
-  // fetch and we flip loading off when done.
-  //
-  // Double-layered timeout:
-  //  - AbortController(8s) aborts the in-flight fetch
-  //  - Promise.race with a plain 9s timer flips loading off even if something
-  //    earlier (e.g. Clerk `getToken()`) is the thing hanging, so we never
-  //    leave the user on an endless spinner.
   const reload = useCallback(async () => {
+    // Dedupe: if something is already fetching, just await the same promise.
+    if (inFlight) return inFlight;
+    // Debounce: if we fetched successfully within the last STALE_MS, skip.
+    if (Date.now() - lastFetchAt < STALE_MS && memoryCache != null) return;
+
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), 8000);
 
-    const work = (async () => {
+    inFlight = (async () => {
       try {
         const r = await authFetch(`${API_BASE}/api/workouts`, { signal: controller.signal } as any);
         const data = await r.json();
@@ -65,17 +65,22 @@ export function useWorkouts(): {
         setWorkouts(list);
         memoryCache = list;
         memoryCacheUserId = userId ?? null;
+        lastFetchAt = Date.now();
         writeCache(userId, 'workouts', list);
       } catch (e: any) {
-        console.warn('[useWorkouts] reload failed:', e?.name === 'AbortError' ? 'timeout after 8s' : e?.message || e);
+        // Keep whatever cached data we have; UI stays usable.
+        const reason = e?.name === 'AbortError' ? 'timeout after 8s' : e?.message || e;
+        console.warn('[useWorkouts] reload failed:', reason);
+      } finally {
+        clearTimeout(abortTimer);
+        setInitializing(false);
       }
     })();
 
-    const deadline = new Promise<void>((resolve) => setTimeout(resolve, 9000));
-    await Promise.race([work, deadline]);
-    clearTimeout(abortTimer);
-    setLoading(false);
+    const p = inFlight;
+    p.finally(() => { if (inFlight === p) inFlight = null; });
+    return p;
   }, [authFetch, userId]);
 
-  return { workouts, loading, reload };
+  return { workouts, initializing, reload };
 }

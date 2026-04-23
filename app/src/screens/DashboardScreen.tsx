@@ -1,7 +1,7 @@
 import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Dimensions, Platform,
+  TouchableOpacity, Dimensions, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -57,15 +57,18 @@ function getCoachInsight(workouts: Workout[], streak: number): string {
 }
 
 export default function DashboardScreen({ colors, sessionActive }: Props) {
-  const { workouts, loading, reload } = useWorkouts();
+  const { workouts, reload } = useWorkouts();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const useKg = useUnits();
   const unit = unitLabel(useKg);
   const health = useHealthSync();
 
-  // Refetch whenever the tab comes into focus; cache keeps the UI populated
-  // instantly, the refresh happens silently in the background.
+  // Refetch when the tab gains focus. The hook dedupes + debounces internally
+  // so even if the callback ref changes on every render, only one request
+  // actually fires and it's skipped if we fetched recently. No full-screen
+  // loading gate: the UI renders instantly from cache (or empty state),
+  // and refreshed data slots in silently when it arrives.
   useFocusEffect(React.useCallback(() => { reload(); }, [reload]));
 
   // --- Computed stats ---
@@ -104,14 +107,6 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   const lastWorkout = workouts[0];
   const coachInsight = getCoachInsight(workouts, streak);
   const TAB_BAR_H = 80 + Math.max(insets.bottom, 8);
-
-  if (loading) {
-    return (
-      <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color="#fff" size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.root}>

@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, ActivityIndicator, Platform,
+  TouchableOpacity, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -55,12 +55,14 @@ function getMuscleTag(w: Workout): string {
 }
 
 export default function HistoryScreen({ colors }: Props) {
-  const { workouts, loading, reload } = useWorkouts();
+  const { workouts, reload } = useWorkouts();
   const [activeFilter, setActiveFilter] = useState('All');
   const [expanded, setExpanded] = useState<number | null>(null);
   const insets = useSafeAreaInsets();
   const useKg = useUnits();
 
+  // UI renders immediately from cache; reload runs silently in the background.
+  // Dedupe/debounce is handled inside useWorkouts.
   useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
   const TAB_BAR_H = 80 + Math.max(insets.bottom, 8);
@@ -86,14 +88,6 @@ export default function HistoryScreen({ colors }: Props) {
     }
     return true; // PRs — would need backend support; show all for now
   });
-
-  if (loading) {
-    return (
-      <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color="#fff" size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={s.root}>
