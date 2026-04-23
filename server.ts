@@ -112,9 +112,20 @@ async function requireAuth(req: any, res: any, next: any) {
 
 async function dbGetWorkouts(userId: string) {
   if (USE_SUPABASE && supabase) {
-    const { data: workouts, error: wErr } = await supabase.from("workouts").select("*").eq("user_id", userId).order("date", { ascending: false });
+    const { data: workouts, error: wErr } = await supabase.from("workouts")
+      .select("*")
+      .eq("user_id", userId)
+      .order("date", { ascending: false });
     if (wErr) throw wErr;
-    const { data: exercises, error: eErr } = await supabase.from("exercises").select("*");
+    const ids = (workouts || []).map((w: any) => w.id);
+    if (ids.length === 0) return [];
+    // Scope the exercise pull to THIS user's workouts only. Previously this
+    // hit `exercises` with no filter and pulled the entire table — a single
+    // `/api/workouts` request scanned all rows for every user on the
+    // platform, which caused ~9GB of Supabase egress in a day.
+    const { data: exercises, error: eErr } = await supabase.from("exercises")
+      .select("id, workout_id, name, muscle_group, sets, reps, weight, distance, duration, calories, pace, notes")
+      .in("workout_id", ids);
     if (eErr) throw eErr;
     return (workouts || []).map((w: any) => ({
       ...w,
