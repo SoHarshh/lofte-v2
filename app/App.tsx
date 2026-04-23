@@ -33,6 +33,26 @@ import CalendarScreen from './src/screens/CalendarScreen';
 import BiologyScreen from './src/screens/BiologyScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import { useUserProfile } from './src/hooks/useUserProfile';
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://85e4969c94fd796506307a4ab5b961bb@o4511267897278464.ingest.us.sentry.io/4511268205297664',
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // Configure Session Replay
+  replaysSessionSampleRate: 0.1,
+  replaysOnErrorSampleRate: 1,
+  integrations: [Sentry.mobileReplayIntegration(), Sentry.feedbackIntegration()],
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
 
 const CLERK_KEY =
   process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ||
@@ -239,7 +259,7 @@ function NavigationContainerInner({ session, startSession, endSession, updateSes
   );
 }
 
-export default function App() {
+export default Sentry.wrap(function App() {
   return (
     <ClerkProvider publishableKey={CLERK_KEY} tokenCache={tokenCache}>
       <SafeAreaProvider>
@@ -250,7 +270,7 @@ export default function App() {
       </SafeAreaProvider>
     </ClerkProvider>
   );
-}
+});
 
 const styles = StyleSheet.create({
   tabContainer: {

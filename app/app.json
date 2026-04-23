@@ -51,7 +51,8 @@
           "healthSharePermission": "LOFTE reads your activity, heart rate, and sleep to personalize your training insights and coaching.",
           "healthUpdatePermission": "LOFTE saves your workouts to Apple Health so they count toward your activity rings."
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {
