@@ -8,15 +8,21 @@ let loadError: string | null = null;
 
 if (Platform.OS === 'ios') {
   try {
+    // Diagnostic: print registered native modules so we can see whether
+    // AppleHealthKit is actually bridged to JS.
+    const allModules = Object.keys(NativeModules).sort();
+    console.log('[health] NativeModules count:', allModules.length);
+    const healthRelated = allModules.filter(k => /health|apple/i.test(k));
+    console.log('[health] Health-related modules:', JSON.stringify(healthRelated));
+    console.log('[health] NativeModules.AppleHealthKit present?:', !!NativeModules.AppleHealthKit);
+
     const mod = require('react-native-health');
     AppleHealthKit = mod.default ?? mod;
     HealthConstants = AppleHealthKit?.Constants ?? null;
-    // Real bridge check: under New Architecture, typeof on a lazy method
-    // can return non-'function'. Presence of Permissions constants is a
-    // reliable signal that the JS wrapper loaded.
     const nativeReg = !!NativeModules.AppleHealthKit;
-    if (!HealthConstants?.Permissions && !nativeReg) {
-      loadError = 'Native HealthKit bridge missing — this build does not include react-native-health.';
+    console.log('[health] wrapper has initHealthKit?:', typeof AppleHealthKit?.initHealthKit);
+    if (!nativeReg) {
+      loadError = 'Native HealthKit bridge missing — NativeModules.AppleHealthKit is undefined. The binary does not contain the registered native module.';
       AppleHealthKit = null;
     }
   } catch (e: any) {
