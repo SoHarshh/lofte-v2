@@ -18,6 +18,7 @@ import { API_BASE } from '../config';
 import { SessionState, TranscriptEntry, Exercise } from '../types/index';
 import { ExercisePicker } from '../components/ExercisePicker';
 import { useUnits, displayWeight, toLbs, unitLabel } from '../utils/units';
+import { setWorkoutsCache, invalidateWorkoutsCache } from '../hooks/useWorkouts';
 import { FONT_SEMIBOLD } from '../utils/fonts';
 import {
   isHealthAvailable, isHealthConnected,
@@ -55,7 +56,7 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
 
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { getToken } = useAuth();
+  const { getToken, userId } = useAuth();
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const useKg = useUnits();
   const unit = unitLabel(useKg);
@@ -459,6 +460,18 @@ export default function SessionScreen({ session, onStart, onEnd, onUpdate, color
       });
       const data = await res.json().catch(() => ({} as any));
       const workoutId = data?.workoutId;
+
+      // Push the freshly-saved workout into the shared cache so Home/History/
+      // Profile — which are already focused or will be next — show it instantly.
+      // We refetch the full list because the backend also assigns PR flags
+      // and calorie totals that we don't compute client-side.
+      invalidateWorkoutsCache();
+      fetch(`${API_BASE}/api/workouts`, { headers })
+        .then((r) => r.json())
+        .then((list) => {
+          if (Array.isArray(list)) setWorkoutsCache(list, userId);
+        })
+        .catch(() => { /* next focus will retry */ });
 
       // Apple Health integration — only if connected
       if (isHealthAvailable() && await isHealthConnected()) {
