@@ -508,6 +508,12 @@ export type MetricName = 'hrv' | 'hr' | 'sleep' | 'steps' | 'cal';
 
 // Returns daily aggregates for the given metric between start and end (inclusive).
 // Missing days are represented as { value: 0 }.
+//
+// PERFORMANCE: Does ONE range-spanning native query per metric, then buckets
+// samples by local-day in JS. Previously this called `fetchDayMetrics` once per
+// day, which ran 6 native queries per day (~60 queries for a 10-day HR range).
+// The new path is ~10× cheaper, which matters on-device — the old version
+// cooked the phone whenever the Health tab re-synced.
 export async function fetchDailyRange(
   metric: MetricName,
   start: Date,
@@ -515,7 +521,7 @@ export async function fetchDailyRange(
 ): Promise<Array<{ date: Date; value: number }>> {
   if (!isHealthAvailable()) return [];
 
-  // Build the list of days
+  // Build the list of local-midnight day anchors
   const days: Date[] = [];
   const cursor = new Date(start); cursor.setHours(0, 0, 0, 0);
   const endDay = new Date(end); endDay.setHours(0, 0, 0, 0);
@@ -523,21 +529,100 @@ export async function fetchDailyRange(
     days.push(new Date(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
+  if (days.length === 0) return [];
 
-  // Fetch all days in parallel (capped)
-  const summaries = await Promise.all(days.map((d) => fetchDayMetrics(d)));
-  return days.map((date, i) => {
-    const s = summaries[i];
-    let value = 0;
-    switch (metric) {
-      case 'hrv':    value = s.hrvMs ?? 0; break;
-      case 'hr':     value = s.restingHeartRate ?? 0; break;
-      case 'sleep':  value = s.sleepHours ?? 0; break;
-      case 'steps':  value = s.steps ?? 0; break;
-      case 'cal':    value = s.activeEnergyKcal ?? 0; break;
-    }
-    return { date, value };
+  const rangeStart = new Date(days[0]); // already local-midnight
+  const rangeEnd = new Date(days[days.length - 1]);
+  rangeEnd.setHours(23, 59, 59, 999);
+  const range = { startDate: rangeStart.toISOString(), endDate: rangeEnd.toISOString() };
+
+  // YMD integer key so we can bucket samples by local day.
+  const dayKey = (d: Date) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  const byDay = new Map<number, number[]>();
+  days.forEach((d) => byDay.set(dayKey(d), []));
+  const push = (d: Date, v: number) => {
+    const b = byDay.get(dayKey(d));
+    if (b && v > 0) b.push(v);
+  };
+  const result = (mode: 'avg' | 'sum', decimals = 0) => days.map((d) => {
+    const b = byDay.get(dayKey(d)) || [];
+    if (b.length === 0) return { date: d, value: 0 };
+    const total = b.reduce((a, x) => a + x, 0);
+    const v = mode === 'avg' ? total / b.length : total;
+    return { date: d, value: +v.toFixed(decimals) };
   });
+
+  if (metric === 'hrv') {
+    // SDNN samples — seconds → ms, average per day
+    const samples = await call<Array<{ value: number; startDate: string }>>(
+      AppleHealthKit.getHeartRateVariabilitySamples,
+      { ...range, ascending: true, limit: 100000 },
+    );
+    if (Array.isArray(samples)) {
+      samples.forEach((s) => push(new Date(s.startDate), (s.value || 0) * 1000));
+    }
+    return result('avg', 1);
+  }
+
+  if (metric === 'hr') {
+    // Resting HR samples — average per day
+    const samples = await call<Array<{ value: number; startDate: string }>>(
+      AppleHealthKit.getRestingHeartRateSamples,
+      { ...range, ascending: true, limit: 10000 },
+    );
+    if (Array.isArray(samples)) {
+      samples.forEach((s) => push(new Date(s.startDate), s.value || 0));
+    }
+    return result('avg');
+  }
+
+  if (metric === 'steps') {
+    // Daily step count samples — sum per day (typically one bucket per day)
+    const samples = await call<Array<{ value: number; startDate: string }>>(
+      AppleHealthKit.getDailyStepCountSamples,
+      { ...range },
+    );
+    if (Array.isArray(samples)) {
+      samples.forEach((s) => push(new Date(s.startDate), s.value || 0));
+    }
+    return result('sum');
+  }
+
+  if (metric === 'cal') {
+    // Active energy samples — sum per day
+    const samples = await call<Array<{ value: number; startDate: string }>>(
+      AppleHealthKit.getActiveEnergyBurned,
+      { ...range, includeManuallyAdded: true },
+    );
+    if (Array.isArray(samples)) {
+      samples.forEach((s) => push(new Date(s.startDate), s.value || 0));
+    }
+    return result('sum');
+  }
+
+  if (metric === 'sleep') {
+    // Sleep segments span midnight, and each day should reflect the night that
+    // ended that morning. Widen the window by one night, then attribute each
+    // segment to its END-DATE day. Sum hours (asleep or in-bed) per day.
+    const sleepWindowStart = new Date(days[0]);
+    sleepWindowStart.setDate(sleepWindowStart.getDate() - 1);
+    sleepWindowStart.setHours(18, 0, 0, 0);
+    const samples = await call<Array<{ startDate: string; endDate: string; value: string }>>(
+      AppleHealthKit.getSleepSamples,
+      { startDate: sleepWindowStart.toISOString(), endDate: range.endDate, limit: 10000 },
+    );
+    if (Array.isArray(samples)) {
+      samples.forEach((s) => {
+        const v = (s.value || '').toUpperCase();
+        if (!v.includes('ASLEEP') && v !== 'INBED') return;
+        const minutes = (new Date(s.endDate).getTime() - new Date(s.startDate).getTime()) / 60000;
+        if (minutes > 0) push(new Date(s.endDate), minutes / 60);
+      });
+    }
+    return result('sum', 2);
+  }
+
+  return days.map((d) => ({ date: d, value: 0 }));
 }
 
 // ─── End of data-fetch helpers ─────────────────────────────────────────────

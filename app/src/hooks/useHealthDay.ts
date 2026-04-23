@@ -55,19 +55,23 @@ export function useHealthDay(date: Date): HealthDayState {
         return;
       }
 
-      const [summary, hourlyHrv, hourlyHr, prevSummary, hrRange, sleepRange] = await Promise.all([
+      // One call each — fetchDailyRange now does a single native query per
+      // metric internally (not N×6 as before), so this is cheap.
+      const [summary, hourlyHrv, hourlyHr, hrvRange, hrRange, sleepRange] = await Promise.all([
         fetchDayMetrics(date),
         fetchHourlyHRV(date),
         fetchHourlyHR(date),
-        fetchDayMetrics(subDays(date, 1)),
+        fetchDailyRange('hrv', subDays(date, 1), date), // for day-over-day delta
         fetchDailyRange('hr', subDays(date, 9), date),
         fetchDailyRange('sleep', subDays(date, 6), date),
       ]);
 
       if (cancelled) return;
 
-      const delta = summary.hrvMs != null && prevSummary.hrvMs != null && prevSummary.hrvMs > 0
-        ? +(((summary.hrvMs - prevSummary.hrvMs) / prevSummary.hrvMs) * 100).toFixed(1)
+      const todayHrv = hrvRange[hrvRange.length - 1]?.value ?? 0;
+      const prevHrv = hrvRange[hrvRange.length - 2]?.value ?? 0;
+      const delta = todayHrv > 0 && prevHrv > 0
+        ? +(((todayHrv - prevHrv) / prevHrv) * 100).toFixed(1)
         : null;
 
       setState({
