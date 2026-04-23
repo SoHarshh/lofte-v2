@@ -15,6 +15,7 @@ import { GlassCard } from '../components/GlassCard';
 import { API_BASE } from '../config';
 import { Workout } from '../types/index';
 import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useWorkouts } from '../hooks/useWorkouts';
 import { isHealthAvailable, useHealthConnection } from '../utils/health';
 
 import { FONT_SEMIBOLD } from '../utils/fonts';
@@ -47,8 +48,7 @@ function formatVol(v: number): string {
 }
 
 export default function ProfileScreen({ colors }: Props) {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { workouts, reload } = useWorkouts();
   const [useKg, setUseKg] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -182,14 +182,9 @@ export default function ProfileScreen({ colors }: Props) {
     }
   };
 
-  const load = useCallback(() => {
-    authFetch(`${API_BASE}/api/workouts`)
-      .then(r => r.json())
-      .then(data => { setWorkouts(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [authFetch]);
-
-  useFocusEffect(load);
+  // Shared cache + dedupe + debounce handled inside the hook — UI renders
+  // instantly from cache and the reload runs silently in the background.
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
   const handleDeleteAccount = async () => {
     setDeleting(true);
@@ -225,14 +220,6 @@ export default function ProfileScreen({ colors }: Props) {
     );
     return Object.keys(bests).length;
   })();
-
-  if (loading) {
-    return (
-      <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color="rgba(255,255,255,0.55)" size="large" />
-      </View>
-    );
-  }
 
   return (
     <View style={s.root}>
