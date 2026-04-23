@@ -8,25 +8,34 @@ let loadError: string | null = null;
 
 if (Platform.OS === 'ios') {
   try {
-    // Diagnostic: print registered native modules so we can see whether
-    // AppleHealthKit is actually bridged to JS.
-    const allModules = Object.keys(NativeModules).sort();
-    console.log('[health] NativeModules count:', allModules.length);
-    const healthRelated = allModules.filter(k => /health|apple/i.test(k));
-    console.log('[health] Health-related modules:', JSON.stringify(healthRelated));
-    console.log('[health] NativeModules.AppleHealthKit present?:', !!NativeModules.AppleHealthKit);
+    // The `react-native-health` library does:
+    //   const { AppleHealthKit } = require('react-native').NativeModules
+    //   export default Object.assign({}, AppleHealthKit, { Constants })
+    // RN's modern NativeModules is a Proxy and exposes native methods via
+    // traps, not enumerable own properties. Object.assign can't see them, so
+    // the library's default export ends up as { Constants } with no methods.
+    // Workaround: grab the native module directly (Proxy direct-access works)
+    // and pull constants from the library's source module.
+    const native = NativeModules.AppleHealthKit;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const constants = require('react-native-health/src/constants');
 
-    const mod = require('react-native-health');
-    AppleHealthKit = mod.default ?? mod;
-    HealthConstants = AppleHealthKit?.Constants ?? null;
-    const nativeReg = !!NativeModules.AppleHealthKit;
-    console.log('[health] wrapper has initHealthKit?:', typeof AppleHealthKit?.initHealthKit);
-    if (!nativeReg) {
-      loadError = 'Native HealthKit bridge missing — NativeModules.AppleHealthKit is undefined. The binary does not contain the registered native module.';
+    if (native && typeof native.initHealthKit === 'function') {
+      AppleHealthKit = native;
+      HealthConstants = {
+        Activities: constants.Activities,
+        Observers: constants.Observers,
+        Permissions: constants.Permissions,
+        Units: constants.Units,
+      };
+    } else {
+      loadError = !native
+        ? 'Native HealthKit bridge missing — NativeModules.AppleHealthKit is undefined.'
+        : 'Native HealthKit bridge is a stub — initHealthKit method is not exposed. Rebuild the iOS app with `pod install`.';
       AppleHealthKit = null;
     }
   } catch (e: any) {
-    loadError = e?.message || 'react-native-health require failed';
+    loadError = e?.message || 'react-native-health load failed';
     AppleHealthKit = null;
   }
 }
