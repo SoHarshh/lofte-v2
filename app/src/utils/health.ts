@@ -607,13 +607,27 @@ export async function fetchDailyRange(
   }
 
   if (metric === 'cal') {
-    // Active energy samples — sum per day
-    const samples = await call<Array<{ value: number; startDate: string }>>(
-      AppleHealthKit.getActiveEnergyBurned,
-      { ...range, includeManuallyAdded: true },
-    );
-    if (Array.isArray(samples)) {
-      samples.forEach((s) => push(new Date(s.startDate), s.value || 0));
+    // Active energy samples — sum per day. Chunk wide ranges into 7-day
+    // windows because `getActiveEnergyBurned` over a whole year can return
+    // 30k+ samples and wedge the native bridge (upstream issue #157).
+    // Sequential chunks so we never have multiple large payloads in flight.
+    const WINDOW = 7;
+    for (let i = 0; i < days.length; i += WINDOW) {
+      const chunkStart = new Date(days[i]);
+      const chunkEndIdx = Math.min(i + WINDOW - 1, days.length - 1);
+      const chunkEnd = new Date(days[chunkEndIdx]);
+      chunkEnd.setHours(23, 59, 59, 999);
+      const samples = await call<Array<{ value: number; startDate: string }>>(
+        AppleHealthKit.getActiveEnergyBurned,
+        {
+          startDate: chunkStart.toISOString(),
+          endDate: chunkEnd.toISOString(),
+          includeManuallyAdded: true,
+        },
+      );
+      if (Array.isArray(samples)) {
+        samples.forEach((s) => push(new Date(s.startDate), s.value || 0));
+      }
     }
     return result('sum');
   }
