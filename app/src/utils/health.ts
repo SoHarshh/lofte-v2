@@ -164,12 +164,12 @@ export async function requestHealthPermissionsDetailed(): Promise<PermissionResu
     // react-native-health when the permission sheet is backgrounded), surface
     // an error instead of hanging the UI forever.
     const timer = setTimeout(() => {
-      console.warn('[health] initHealthKit timed out after 15s');
+      console.warn('[health] initHealthKit timed out after 60s');
       done({
         ok: false, reason: 'error',
         message: 'Health permission request timed out. Try closing the app and re-opening it.',
       });
-    }, 15000);
+    }, 60000);
 
     AppleHealthKit.initHealthKit(perms, (err: string) => {
       clearTimeout(timer);
