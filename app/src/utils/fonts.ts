@@ -14,11 +14,15 @@ export const FONT_SEMIBOLD = 'Inter_600SemiBold';
 export const FONT_BOLD = 'Inter_700Bold';
 
 // ── Titles & headlines (Fraunces, serif) ───────────────────────────────────
+// Only Light is bundled in App.tsx. The other weight exports point at Light
+// so existing references don't crash at runtime (missing weights would fall
+// back to system serif). Re-import the relevant weight in App.tsx AND point
+// the export here at the right postscript name if you need more.
 export const HEADING_LIGHT = 'Fraunces_300Light';
-export const HEADING_REGULAR = 'Fraunces_400Regular';
-export const HEADING_MEDIUM = 'Fraunces_500Medium';
-export const HEADING_SEMIBOLD = 'Fraunces_600SemiBold';
-export const HEADING_BOLD = 'Fraunces_700Bold';
+export const HEADING_REGULAR = 'Fraunces_300Light';
+export const HEADING_MEDIUM = 'Fraunces_300Light';
+export const HEADING_SEMIBOLD = 'Fraunces_300Light';
+export const HEADING_BOLD = 'Fraunces_300Light';
 
 // Default fallback for `fontFamily: SYSTEM` usage — assumes heading context.
-export const SYSTEM = HEADING_SEMIBOLD;
+export const SYSTEM = HEADING_LIGHT;

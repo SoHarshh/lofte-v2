@@ -16,13 +16,11 @@ import {
   Inter_600SemiBold,
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
-import {
-  Fraunces_300Light,
-  Fraunces_400Regular,
-  Fraunces_500Medium,
-  Fraunces_600SemiBold,
-  Fraunces_700Bold,
-} from '@expo-google-fonts/fraunces';
+// Only Light is used (Dashboard 'Start Workout' CTA). Other weights were
+// loaded historically but never referenced — dropped to trim ~1.5MB off
+// the binary. If you start using another weight, re-import it here AND
+// keep the postscript name in `src/utils/fonts.ts` in sync.
+import { Fraunces_300Light } from '@expo-google-fonts/fraunces';
 import { SessionState } from './src/types/index';
 import { AppBackground } from './src/components/AppBackground';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -159,10 +157,6 @@ function MainApp() {
     Inter_600SemiBold,
     Inter_700Bold,
     Fraunces_300Light,
-    Fraunces_400Regular,
-    Fraunces_500Medium,
-    Fraunces_600SemiBold,
-    Fraunces_700Bold,
   });
 
   const startSession = () =>
