@@ -240,12 +240,24 @@ function todayRange() {
   return { startDate: start.toISOString(), endDate: end.toISOString() };
 }
 
+// Always resolves (never rejects) so Promise.all() can't hang on a single
+// bad query. Wraps the native callback in a 6s watchdog — if HealthKit
+// never fires the callback (which upstream has reported for some metric
+// types under back-pressure), we move on rather than parking the
+// entire Promise.all forever.
 function call<T>(fn: (opts: any, cb: (err: any, res: T) => void) => void, opts: any): Promise<T | null> {
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (v: T | null) => { if (!settled) { settled = true; resolve(v); } };
+    const timer = setTimeout(() => done(null), 6000);
     try {
-      fn(opts, (err: any, res: T) => resolve(err ? null : res));
+      fn(opts, (err: any, res: T) => {
+        clearTimeout(timer);
+        done(err ? null : res);
+      });
     } catch {
-      resolve(null);
+      clearTimeout(timer);
+      done(null);
     }
   });
 }
@@ -286,8 +298,11 @@ export async function getTodayMetrics(): Promise<HealthMetrics> {
   let sleepMinutes = 0;
   if (Array.isArray(sleep)) {
     sleep.forEach((s) => {
+      // iOS 16+ emits overlapping INBED + ASLEEP_CORE/DEEP/REM/UNSPECIFIED
+      // samples for the same window. Counting both double-counts a night.
+      // Match Apple Health's "Time Asleep" total by only summing ASLEEP*.
       const v = (s.value || '').toUpperCase();
-      if (v.includes('ASLEEP') || v === 'INBED') {
+      if (v.includes('ASLEEP')) {
         const diff = (new Date(s.endDate).getTime() - new Date(s.startDate).getTime()) / 60000;
         if (diff > 0) sleepMinutes += diff;
       }
@@ -405,8 +420,11 @@ export async function fetchDayMetrics(d: Date): Promise<HealthMetrics> {
   let sleepMinutes = 0;
   if (Array.isArray(sleep)) {
     sleep.forEach((s) => {
+      // iOS 16+ emits overlapping INBED + ASLEEP_CORE/DEEP/REM/UNSPECIFIED
+      // samples for the same window. Counting both double-counts a night.
+      // Match Apple Health's "Time Asleep" total by only summing ASLEEP*.
       const v = (s.value || '').toUpperCase();
-      if (v.includes('ASLEEP') || v === 'INBED') {
+      if (v.includes('ASLEEP')) {
         const diff = (new Date(s.endDate).getTime() - new Date(s.startDate).getTime()) / 60000;
         if (diff > 0) sleepMinutes += diff;
       }
@@ -613,8 +631,9 @@ export async function fetchDailyRange(
     );
     if (Array.isArray(samples)) {
       samples.forEach((s) => {
+        // Only ASLEEP* — see note in fetchDayMetrics / getTodayMetrics.
         const v = (s.value || '').toUpperCase();
-        if (!v.includes('ASLEEP') && v !== 'INBED') return;
+        if (!v.includes('ASLEEP')) return;
         const minutes = (new Date(s.endDate).getTime() - new Date(s.startDate).getTime()) / 60000;
         if (minutes > 0) push(new Date(s.endDate), minutes / 60);
       });
