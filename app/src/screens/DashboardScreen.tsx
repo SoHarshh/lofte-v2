@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, ActivityIndicator, Dimensions, Platform,
@@ -7,9 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassCard } from '../components/GlassCard';
-import { API_BASE } from '../config';
 import { Workout } from '../types/index';
-import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useWorkouts } from '../hooks/useWorkouts';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
 import { useHealthSync } from '../hooks/useHealthSync';
 
@@ -58,23 +57,16 @@ function getCoachInsight(workouts: Workout[], streak: number): string {
 }
 
 export default function DashboardScreen({ colors, sessionActive }: Props) {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { workouts, loading, reload } = useWorkouts();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const authFetch = useAuthFetch();
   const useKg = useUnits();
   const unit = unitLabel(useKg);
   const health = useHealthSync();
 
-  const load = useCallback(() => {
-    authFetch(`${API_BASE}/api/workouts`)
-      .then(r => r.json())
-      .then(data => { setWorkouts(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [authFetch]);
-
-  useFocusEffect(load);
+  // Refetch whenever the tab comes into focus; cache keeps the UI populated
+  // instantly, the refresh happens silently in the background.
+  useFocusEffect(React.useCallback(() => { reload(); }, [reload]));
 
   // --- Computed stats ---
   const streak = calcStreak(workouts);
@@ -116,7 +108,7 @@ export default function DashboardScreen({ colors, sessionActive }: Props) {
   if (loading) {
     return (
       <View style={[styles.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="#fff" size="large" />
       </View>
     );
   }

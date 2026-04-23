@@ -7,9 +7,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GlassCard } from '../components/GlassCard';
-import { API_BASE } from '../config';
 import { Workout, Exercise } from '../types/index';
-import { useAuthFetch } from '../hooks/useAuthFetch';
+import { useWorkouts } from '../hooks/useWorkouts';
 import { useUnits, displayWeight, unitLabel } from '../utils/units';
 
 import { FONT_MEDIUM } from '../utils/fonts';
@@ -56,22 +55,13 @@ function getMuscleTag(w: Workout): string {
 }
 
 export default function HistoryScreen({ colors }: Props) {
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { workouts, loading, reload } = useWorkouts();
   const [activeFilter, setActiveFilter] = useState('All');
   const [expanded, setExpanded] = useState<number | null>(null);
   const insets = useSafeAreaInsets();
-  const authFetch = useAuthFetch();
   const useKg = useUnits();
 
-  const load = useCallback(() => {
-    authFetch(`${API_BASE}/api/workouts`)
-      .then(r => r.json())
-      .then(data => { setWorkouts(Array.isArray(data) ? data : []); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [authFetch]);
-
-  useFocusEffect(load);
+  useFocusEffect(useCallback(() => { reload(); }, [reload]));
 
   const TAB_BAR_H = 80 + Math.max(insets.bottom, 8);
 
@@ -100,7 +90,7 @@ export default function HistoryScreen({ colors }: Props) {
   if (loading) {
     return (
       <View style={[s.root, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={colors.accent} size="large" />
+        <ActivityIndicator color="#fff" size="large" />
       </View>
     );
   }
