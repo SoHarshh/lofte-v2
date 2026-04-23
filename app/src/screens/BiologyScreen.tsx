@@ -172,6 +172,17 @@ function headerDateLine(d: Date): string {
   return `${wk} · ${m} ${d.getDate()}`;
 }
 
+function formatSyncedAt(ms: number | null): string {
+  if (ms == null) return '';
+  const diff = Math.max(0, Date.now() - ms);
+  if (diff < 60_000) return 'just now';
+  const mins = Math.round(diff / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
+
 // ─── Empty state for a chart area ───────────────────────────────────────────
 
 function EmptyChart({ message }: { message: string }) {
@@ -366,6 +377,9 @@ function HealthHome({ onOpen }: { onOpen: (k: MetricKey) => void }) {
           <View style={{ alignItems: 'center' }}>
             <Text style={styles.dateLine}>{headerDateLine(selectedDate)}</Text>
             <Text style={[styles.headerTitle, { fontFamily: SYSTEM, marginTop: 2 }]}>Health</Text>
+            {isToday && health.syncedAt != null && (
+              <Text style={styles.syncLine}>SYNCED {formatSyncedAt(health.syncedAt).toUpperCase()}</Text>
+            )}
           </View>
           <Pressable
             onPress={goNext}
@@ -710,6 +724,10 @@ const styles = StyleSheet.create({
   dateLine: {
     fontSize: 10, color: 'rgba(255,255,255,0.42)',
     letterSpacing: 1.7,
+  },
+  syncLine: {
+    fontSize: 9, color: 'rgba(255,255,255,0.30)',
+    letterSpacing: 1.4, marginTop: 4,
   },
 
   // Hero
