@@ -47,20 +47,34 @@ export function useWorkouts(): {
   // Step 2 — always refetch in the background. If cache hit already happened,
   // this quietly replaces state with fresh data. Otherwise it's the first
   // fetch and we flip loading off when done.
+  //
+  // Double-layered timeout:
+  //  - AbortController(8s) aborts the in-flight fetch
+  //  - Promise.race with a plain 9s timer flips loading off even if something
+  //    earlier (e.g. Clerk `getToken()`) is the thing hanging, so we never
+  //    leave the user on an endless spinner.
   const reload = useCallback(async () => {
-    try {
-      const r = await authFetch(`${API_BASE}/api/workouts`);
-      const data = await r.json();
-      const list: Workout[] = Array.isArray(data) ? data : [];
-      setWorkouts(list);
-      memoryCache = list;
-      memoryCacheUserId = userId ?? null;
-      writeCache(userId, 'workouts', list);
-    } catch {
-      // Keep whatever cached data we had; network will retry next focus
-    } finally {
-      setLoading(false);
-    }
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), 8000);
+
+    const work = (async () => {
+      try {
+        const r = await authFetch(`${API_BASE}/api/workouts`, { signal: controller.signal } as any);
+        const data = await r.json();
+        const list: Workout[] = Array.isArray(data) ? data : [];
+        setWorkouts(list);
+        memoryCache = list;
+        memoryCacheUserId = userId ?? null;
+        writeCache(userId, 'workouts', list);
+      } catch (e: any) {
+        console.warn('[useWorkouts] reload failed:', e?.name === 'AbortError' ? 'timeout after 8s' : e?.message || e);
+      }
+    })();
+
+    const deadline = new Promise<void>((resolve) => setTimeout(resolve, 9000));
+    await Promise.race([work, deadline]);
+    clearTimeout(abortTimer);
+    setLoading(false);
   }, [authFetch, userId]);
 
   return { workouts, loading, reload };
