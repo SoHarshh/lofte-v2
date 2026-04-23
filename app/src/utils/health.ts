@@ -11,9 +11,11 @@ if (Platform.OS === 'ios') {
     const mod = require('react-native-health');
     AppleHealthKit = mod.default ?? mod;
     HealthConstants = AppleHealthKit?.Constants ?? null;
-    if (typeof AppleHealthKit?.initHealthKit !== 'function') {
-      // Package loaded but native bridge is missing (e.g. running in Expo Go
-      // or a bundle that wasn't re-linked after adding react-native-health).
+    // Real bridge check: under New Architecture, typeof on a lazy method
+    // can return non-'function'. Presence of Permissions constants is a
+    // reliable signal that the JS wrapper loaded.
+    const nativeReg = !!NativeModules.AppleHealthKit;
+    if (!HealthConstants?.Permissions && !nativeReg) {
       loadError = 'Native HealthKit bridge missing — this build does not include react-native-health.';
       AppleHealthKit = null;
     }
